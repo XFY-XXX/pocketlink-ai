@@ -2140,6 +2140,45 @@ textarea {
   color: var(--acc);
 }
 
+.memory-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.memory-type {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--acc) 12%, var(--panel2));
+  color: var(--acc);
+}
+
+.memory-item-main {
+  min-width: 0;
+}
+
+.memory-item-main strong,
+.memory-item-main small {
+  display: block;
+}
+
+.memory-item-main strong {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.memory-item-main small {
+  margin-top: 3px;
+  color: var(--dim);
+  font-size: 8.5px;
+}
+
 .notification + .notification {
   margin-top: 7px;
 }

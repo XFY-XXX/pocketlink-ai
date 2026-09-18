@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "pocketlink-shell-v5";
+const CACHE_NAME = "pocketlink-shell-v6";
 const APP_SHELL = [
   "./",
   "./index.html",

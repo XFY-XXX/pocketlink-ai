@@ -3,14 +3,23 @@
 /* PocketLink 应用运行时。 */
 
 const DB_NAME = "pocketlink";
-const DB_VERSION = 1;
-const APP_VERSION = 5;
+const DB_VERSION = 2;
+const APP_VERSION = 6;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {
   characters: { keyPath: "id", indexes: [["createdAt", "createdAt"], ["name", "name"]] },
   chats: { keyPath: "id", indexes: [["lastActiveAt", "lastActiveAt"], ["type", "type"], ["pinned", "pinned"]] },
   messages: { keyPath: "id", indexes: [["chatId", "chatId"], ["time", "time"]] },
+  memories: {
+    keyPath: "id",
+    indexes: [
+      ["characterId", "characterId"],
+      ["chatId", "chatId"],
+      ["type", "type"],
+      ["createdAt", "createdAt"]
+    ]
+  },
   worldbooks: { keyPath: "id", indexes: [["name", "name"]] },
   presets: { keyPath: "id", indexes: [["name", "name"]] },
   apiConfigs: { keyPath: "id", indexes: [["category", "category"], ["provider", "provider"]] },
@@ -256,6 +265,7 @@ const state = {
   contentTab: "characters",
   apiTab: "text",
   healthPerceptions: [],
+  memoryCounts: {},
   suppressProactiveOnce: false,
   draggingElement: null,
   longPressTimer: null,
@@ -461,6 +471,7 @@ function openDatabase() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
+      const oldVersion = request.oldVersion;
       for (const [name, definition] of Object.entries(STORE_DEFS)) {
         let store;
         if (!db.objectStoreNames.contains(name)) {
@@ -472,10 +483,16 @@ function openDatabase() {
           if (!store.indexNames.contains(indexName)) store.createIndex(indexName, keyPath, { unique: false });
         }
       }
+      if (oldVersion < 2) migrateV1toV2(db);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+function migrateV1toV2(db) {
+  // v2 只新增 memories store；现有角色、聊天和媒体数据不动。
+  console.info("PocketLink：数据库已从 v1 升级到 v2，长期记忆库已就绪。", db.version);
 }
 
 function dbRequest(storeName, mode, operation) {
@@ -694,7 +711,7 @@ function defaultChat(type, members, title = "") {
   return {
     id: uid(), createdAt: stamp, updatedAt: stamp, lastActiveAt: stamp,
     type, members, title, unread: 0, pinned: false, muted: false,
-    archived: false, draft: "", messages: [], summary: "",
+    archived: false, draft: "", messages: [], summary: "", lastMemoryExtractAt: 0,
     summaryUpdatedAt: 0, summaryCoversUpTo: 0, memory: [],
     modelOverride: null, presetOverride: null, systemPromptExtra: "",
     groupState: type === "group" ? {
@@ -860,7 +877,10 @@ async function loadAllData() {
   state.settings = { ...clone(DEFAULT_SETTINGS), ...(settings || {}) };
   state.settings.health = { ...clone(DEFAULT_SETTINGS.health), ...(state.settings.health || {}) };
   state.characters = characters.map(normalizeCharacterRecord).sort((a, b) => b.updatedAt - a.updatedAt);
-  state.chats = sortByTimeDesc(chats);
+  state.chats = sortByTimeDesc(chats.map((chat) => ({
+    ...chat,
+    lastMemoryExtractAt: toNumber(chat.lastMemoryExtractAt, 0)
+  })));
   state.worldbooks = worldbooks.sort((a, b) => b.updatedAt - a.updatedAt);
   state.presets = presets.sort((a, b) => b.updatedAt - a.updatedAt);
   state.apiConfigs = apiConfigs.map(normalizeApiConfig).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1293,6 +1313,7 @@ function renderChatPage() {
   if (!chat) return `<div class="empty-state"><p>聊天窗口不存在。</p><button class="btn primary" data-route="messages">返回消息</button></div>`;
   const members = chat.members.map((id) => getById(state.characters, id)).filter(Boolean);
   const typing = [...state.typingCharIds].map((id) => getById(state.characters, id)?.name).filter(Boolean);
+  const memoryCount = toNumber(state.memoryCounts[chat.members[0]], 0);
   const groupState = chat.groupState;
   const quickGroups = state.quickReplies.filter((item) => state.settings.activeQuickReplyIds.includes(item.id));
   const quickButtons = quickGroups.flatMap((group) => group.qrList.filter((item) => !item.isHidden).slice(0, 8).map((item) => ({ group, item })));
@@ -1302,7 +1323,7 @@ function renderChatPage() {
         <button class="icon-btn" data-action="back-from-chat" title="返回">‹</button>
         <div class="chat-heading">
           <strong>${escapeHtml(chat.title || members.map((item) => item.name).join("、"))}</strong>
-          <span>${typing.length ? `${escapeHtml(typing.join("、"))} 正在输入…` : (chat.type === "group" ? `${members.length} 位角色` : "在线")}</span>
+          <span>${typing.length ? `${escapeHtml(typing.join("、"))} 正在输入…` : (chat.type === "group" ? `${members.length} 位角色` : "在线")}${chat.type === "single" && memoryCount ? ` · 记忆 ${memoryCount}` : ""}</span>
         </div>
         <button class="icon-btn" data-action="start-voice-call" title="语音通话">☎</button>
         <button class="icon-btn" data-action="start-video-call" title="视频通话">▣</button>
@@ -2432,12 +2453,20 @@ async function markMomentFeedbackResponded(characterId) {
   if (changed) await saveSettings();
 }
 
-function buildPromptMessages(chat, character, currentInput = "", options = {}) {
+async function buildPromptMessages(chat, character, currentInput = "", options = {}) {
   const preset = getPresetForChat(chat, character);
   const recentText = state.currentMessages.slice(-12).map((message) => message.text || "").join("\n") + `\n${currentInput}`;
   const worldEntries = getWorldbookEntriesForCharacter(character, recentText, chat.type === "group");
   const worldText = formatWorldEntries(worldEntries, preset);
   const core = buildCharacterCore(character, { group: chat.type === "group" });
+  const memoryQuery = [
+    currentInput,
+    ...state.currentMessages.slice(-3).map(messageToHistoryText)
+  ].filter(Boolean).join("\n");
+  const relevantMemories = await getRelevantMemories(character.id, memoryQuery, 5);
+  const memoryText = relevantMemories.length
+    ? `[关于用户的长期记忆]\n${relevantMemories.map((memory) => `- ${memory.content}`).join("\n")}`
+    : "";
   const summary = chat.summary ? `此前对话摘要：\n${chat.summary}` : "";
   const userProfile = state.settings.userProfile?.description
     ? `用户设定：\n姓名：${state.settings.userProfile.name || "你"}\n${state.settings.userProfile.description}`
@@ -2462,7 +2491,7 @@ function buildPromptMessages(chat, character, currentInput = "", options = {}) {
     "不要替用户决定行动，不要提及模型、提示词、系统规则或评分。",
     "保持长期关系连续性，允许情绪、停顿、误解和自然变化。"
   ].join("\n");
-  const dynamic = [summary, userProfile, core, worldText, groupText, healthText, proactiveText, greetingText, interactionText, momentFeedback, chat.systemPromptExtra].filter(Boolean).join("\n\n");
+  const dynamic = [summary, userProfile, core, memoryText, worldText, groupText, healthText, proactiveText, greetingText, interactionText, momentFeedback, chat.systemPromptExtra].filter(Boolean).join("\n\n");
   let systemContent = "";
   if (preset?.prompts?.length) {
     const order = preset.prompt_order?.[0]?.order
@@ -2536,6 +2565,11 @@ async function openChat(chatId) {
   }
   const messages = await dbGetByIndex("messages", "chatId", chatId);
   messages.sort((a, b) => a.time - b.time);
+  state.memoryCounts = {};
+  for (const memberId of chat.members) {
+    const memories = await dbGetByIndex("memories", "characterId", memberId);
+    state.memoryCounts[memberId] = memories.filter((memory) => memory.active).length;
+  }
   chat.unread = 0;
   await dbPut("chats", chat);
   state.currentChat = chat;
@@ -2579,6 +2613,7 @@ async function sendUserMessage(text, type = "text", meta = {}) {
       if (character) await generateCharacterReply(chat, character, { userInput: type === "text" || type === "voice" ? value : "" });
     }
   }
+  queueMemoryExtraction(chat);
 }
 
 async function generateCharacterReply(chat, character, options = {}) {
@@ -2594,7 +2629,7 @@ async function generateCharacterReply(chat, character, options = {}) {
     renderScreen();
   }
   try {
-    const prompt = buildPromptMessages(chat, character, options.userInput || "", {
+    const prompt = await buildPromptMessages(chat, character, options.userInput || "", {
       proactive: options.proactive,
       greeting: options.greeting,
       interactionPrompt: options.interactionPrompt
@@ -2825,6 +2860,244 @@ async function maybeCreateGroupMilestone(chat, character, text) {
     chatId: chat.id,
     messageIds: recent.map((message) => message.id)
   });
+}
+
+/* ---------- 结构化长期记忆 ---------- */
+
+function queueMemoryExtraction(chat) {
+  const last = toNumber(chat.lastMemoryExtractAt, 0);
+  const visibleMessages = state.currentChat?.id === chat.id
+    ? state.currentMessages
+    : [];
+  const newMessageCount = last > 0
+    ? visibleMessages.filter((message) => message.time > last).length
+    : visibleMessages.length;
+  if (newMessageCount < 20) return;
+  setTimeout(() => {
+    extractMemoriesForChat(chat).catch((error) => console.warn("长期记忆提取失败", error));
+  }, 0);
+}
+
+async function extractMemoriesForChat(chat, options = {}) {
+  const config = getDefaultApi("text");
+  if (!config) {
+    console.warn("长期记忆提取跳过：未配置文字模型");
+    return;
+  }
+  const allMessages = await dbGetByIndex("messages", "chatId", chat.id);
+  allMessages.sort((a, b) => a.time - b.time);
+  const startAt = toNumber(chat.lastMemoryExtractAt, 0);
+  let segment = startAt > 0
+    ? allMessages.filter((message) => message.time > startAt)
+    : allMessages.slice(toNumber(chat.summaryCoversUpTo, 0));
+  if (!options.force && segment.length < 20) return;
+  if (!options.force && startAt > 0 && now() - startAt < 5 * 60_000) return;
+  if (!segment.length) return;
+
+  const targetIds = options.characterId ? [options.characterId] : [...chat.members];
+  const characters = targetIds.map((id) => getById(state.characters, id)).filter(Boolean);
+  const transcript = segment.map((message) => {
+    const speaker = message.role === "user"
+      ? state.settings.userProfile?.name || "用户"
+      : getById(state.characters, message.charId)?.name || "角色";
+    return `${speaker}：${messageToHistoryText(message)}`;
+  }).filter(Boolean).join("\n");
+  if (!transcript.trim()) return;
+
+  let extractedAny = false;
+  for (const character of characters) {
+    try {
+      await extractMemoriesForCharacter(character, chat, segment, transcript, config);
+      extractedAny = true;
+    } catch (error) {
+      console.warn(`角色 ${character.name} 的记忆提取失败`, error);
+    }
+  }
+  if (extractedAny) {
+    chat.lastMemoryExtractAt = allMessages.at(-1)?.time || now();
+    chat.updatedAt = now();
+    await dbPut("chats", chat);
+    if (state.currentChat?.id === chat.id) state.currentChat.lastMemoryExtractAt = chat.lastMemoryExtractAt;
+  }
+}
+
+async function extractMemoriesForCharacter(character, chat, segment, transcript, config) {
+  const prompt = `你是记忆提取专家。从下面这段对话里，提取所有关于用户的重要信息，按 JSON 数组返回。
+
+每个条目包含：
+- type: "fact" | "relationship" | "promise" | "preference" | "event"
+- content: 一句简洁的中文描述（不超过 40 字）
+
+提取原则：
+1. 只提取关于用户的事实、偏好、承诺、关系变化、重要事件
+2. 不提取角色自己的事，除非和用户有关
+3. 不提取日常寒暄（"你好""吃了吗"）
+4. 不提取临时状态（"现在有点困"）
+5. 提取用户明确表达过的偏好、厌恶、习惯
+6. 提取双方约定过的事（承诺、计划）
+7. 提取关系变化（从陌生到熟悉、争执、和解）
+8. 同一件事只提取一次，不要重复
+
+只返回 JSON 数组，不要任何解释。如果这段对话没有值得提取的内容，返回空数组 []。
+
+示例输出：
+[
+  {"type": "preference", "content": "用户喜欢无糖可乐"},
+  {"type": "promise", "content": "约定周末去看海"},
+  {"type": "event", "content": "用户提到最近在加班"},
+  {"type": "relationship", "content": "两人第一次发生争执"}
+]
+
+对话内容：
+${transcript}`;
+  const result = await sendTextCompletion(config, [
+    { role: "system", content: `你是${character.name}的长期记忆整理器，只提取用户相关信息。` },
+    { role: "user", content: prompt }
+  ], { sampling: { temperature: .3, max_tokens: 1400 } });
+  const entries = parseMemoryExtractionResponse(result.text);
+  if (!entries.length) return;
+  const existing = (await dbGetByIndex("memories", "characterId", character.id))
+    .filter((memory) => memory.active);
+  for (const memory of existing) {
+    if (isMemoryContradicted(memory, transcript)) {
+      memory.active = false;
+      memory.lastAccessedAt = now();
+      await dbPut("memories", memory);
+    }
+  }
+  for (const entry of entries.slice(0, 30)) {
+    const content = String(entry.content || "").trim().slice(0, 120);
+    if (!content) continue;
+    const duplicate = existing.find((memory) => memory.active && memorySimilarity(memory.content, content) >= .8);
+    if (duplicate) {
+      duplicate.sourceMessageIds = [...new Set([...(duplicate.sourceMessageIds || []), ...segment.map((message) => message.id)])].slice(-80);
+      duplicate.createdAt = now();
+      duplicate.active = true;
+      await dbPut("memories", duplicate);
+      continue;
+    }
+    const memory = {
+      id: uid(),
+      characterId: character.id,
+      chatId: chat.id,
+      type: normalizeMemoryType(entry.type),
+      content,
+      sourceMessageIds: segment.map((message) => message.id).slice(-30),
+      createdAt: now(),
+      lastAccessedAt: 0,
+      accessCount: 0,
+      active: true
+    };
+    existing.push(memory);
+    await dbPut("memories", memory);
+  }
+}
+
+function parseMemoryExtractionResponse(text) {
+  let value = String(text || "").trim();
+  value = value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const start = value.indexOf("[");
+  const end = value.lastIndexOf("]");
+  if (start < 0 || end < start) return [];
+  const parsed = parseJsonSafe(value.slice(start, end + 1), []);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function normalizeMemoryType(type) {
+  return ["fact", "relationship", "promise", "preference", "event"].includes(type) ? type : "fact";
+}
+
+function normalizeMemoryText(text) {
+  return String(text || "").toLowerCase().replace(/[\s，。！？、,.!?;；:：'"“”‘’]/g, "");
+}
+
+function memorySimilarity(left, right) {
+  const a = normalizeMemoryText(left);
+  const b = normalizeMemoryText(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const grams = (value) => {
+    if (value.length < 2) return new Set([value]);
+    const set = new Set();
+    for (let index = 0; index < value.length - 1; index += 1) set.add(value.slice(index, index + 2));
+    return set;
+  };
+  const leftSet = grams(a);
+  const rightSet = grams(b);
+  let intersection = 0;
+  for (const item of leftSet) if (rightSet.has(item)) intersection += 1;
+  const total = leftSet.size + rightSet.size;
+  return total ? (intersection * 2) / total : 0;
+}
+
+function isMemoryContradicted(memory, text) {
+  const content = normalizeMemoryText(memory.content);
+  const source = normalizeMemoryText(text);
+  const tokens = (memory.content.match(/[\u4e00-\u9fffA-Za-z0-9]{2,}/g) || [])
+    .map((item) => item.toLowerCase())
+    .filter((item) => !["用户", "喜欢", "最近", "约定", "关系", "已经", "不再"].includes(item));
+  return tokens.some((token) => {
+    if (!source.includes(token)) return false;
+    return new RegExp(`(不|没|不再|已经不|不喜欢|不想).{0,8}${escapeRegExp(token)}`).test(source)
+      || new RegExp(`${escapeRegExp(token)}.{0,8}(了|不再|没有)`).test(source)
+      || content.includes(`不${token}`) && source.includes(`不${token}`);
+  });
+}
+
+async function expireStaleMemories(memories) {
+  const expired = [];
+  for (const memory of memories) {
+    if (memory.active && now() - memory.createdAt > 90 * 86_400_000 && toNumber(memory.accessCount, 0) === 0) {
+      memory.active = false;
+      memory.lastAccessedAt = now();
+      await dbPut("memories", memory);
+      expired.push(memory.id);
+    }
+  }
+  return expired;
+}
+
+function matchMemory(memory, query) {
+  const baseTokens = String(query || "")
+    .toLowerCase()
+    .split(/\s+|，|。|！|？|,|\.|!|\?/)
+    .map(normalizeMemoryText)
+    .filter((token) => token.length >= 2);
+  const queryTokens = new Set(baseTokens);
+  for (const token of baseTokens) {
+    if (token.length <= 3 || !/[\u4e00-\u9fff]/.test(token)) continue;
+    for (let index = 0; index < token.length - 1; index += 1) {
+      queryTokens.add(token.slice(index, index + 2));
+    }
+  }
+  const content = normalizeMemoryText(memory.content);
+  let score = 0;
+  for (const token of queryTokens) if (content.includes(token)) score += 10;
+  if (memory.type === "promise") score += 5;
+  if (memory.type === "relationship") score += 3;
+  score += Math.min(toNumber(memory.accessCount, 0), 5);
+  const ageDays = Math.max(0, (now() - memory.createdAt) / 86_400_000);
+  score += Math.max(0, 3 - ageDays / 30);
+  return score;
+}
+
+async function getRelevantMemories(characterId, query, limit = 5) {
+  if (!characterId) return [];
+  const memories = (await dbGetByIndex("memories", "characterId", characterId))
+    .filter((memory) => memory.active);
+  await expireStaleMemories(memories);
+  const active = memories.filter((memory) => memory.active);
+  const ranked = active
+    .map((memory) => ({ memory, score: matchMemory(memory, query) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || b.memory.createdAt - a.memory.createdAt)
+    .slice(0, limit);
+  for (const item of ranked) {
+    item.memory.lastAccessedAt = now();
+    item.memory.accessCount = toNumber(item.memory.accessCount, 0) + 1;
+    await dbPut("memories", item.memory);
+  }
+  return ranked.map((item) => item.memory);
 }
 
 /* ---------- 主动消息 ---------- */
@@ -3429,6 +3702,32 @@ function renderMemoryCard(memory) {
     </article>`;
 }
 
+function renderMemoryItem(memory) {
+  const icons = {
+    fact: "●",
+    relationship: "♡",
+    promise: "✓",
+    preference: "★",
+    event: "◇"
+  };
+  const labels = {
+    fact: "事实",
+    relationship: "关系",
+    promise: "承诺",
+    preference: "偏好",
+    event: "事件"
+  };
+  return `
+    <div class="memory-item">
+      <span class="memory-type">${icons[memory.type] || "●"}</span>
+      <span class="memory-item-main">
+        <strong>${escapeHtml(memory.content)}</strong>
+        <small>${escapeHtml(labels[memory.type] || "事实")} · ${formatTime(memory.createdAt, true)} · 检索 ${memory.accessCount || 0} 次</small>
+      </span>
+      <button type="button" class="icon-btn danger" data-action="delete-memory" data-id="${escapeAttr(memory.id)}">×</button>
+    </div>`;
+}
+
 /* ---------- 面板与表单基础 ---------- */
 
 function openSheet(title, items) {
@@ -3575,9 +3874,12 @@ function openGroupPicker() {
 
 /* ---------- 角色表单 ---------- */
 
-function openCharacterForm(characterId = null) {
+async function openCharacterForm(characterId = null) {
   const character = characterId ? getById(state.characters, characterId) : defaultCharacter();
   if (!character) return;
+  const memories = characterId
+    ? (await dbGetByIndex("memories", "characterId", characterId)).filter((memory) => memory.active)
+    : [];
   const worldbookOptions = state.worldbooks.map((item) => `
     <label class="check-row"><span>${escapeHtml(item.name)}<small>${item.entries.length} 条</small></span><span class="switch"><input type="checkbox" name="boundWorldbook" value="${escapeAttr(item.id)}" ${character.boundWorldbooks.includes(item.id) ? "checked" : ""}><i></i></span></label>
   `).join("");
@@ -3693,6 +3995,14 @@ function openCharacterForm(characterId = null) {
       <div class="surface">
         <div class="surface-title"><strong>绑定世界书</strong><span>私密条目仅在该角色视角中注入</span></div>
         ${worldbookOptions || `<div class="entry-preview">暂无世界书。</div>`}
+      </div>
+      <div class="surface">
+        <div class="surface-title"><strong>记忆库</strong><span>${memories.length} 条长期记忆</span></div>
+        <div class="card-actions" style="margin:0 0 10px">
+          <button type="button" class="btn small primary" data-action="extract-memories-now" data-id="${escapeAttr(character.id)}">立即提取</button>
+          <button type="button" class="btn small danger" data-action="clear-character-memories" data-id="${escapeAttr(character.id)}">清空记忆</button>
+        </div>
+        ${memories.length ? memories.map(renderMemoryItem).join("") : `<div class="entry-preview">还没有长期记忆。积累 20 条新消息后会自动提取。</div>`}
       </div>
     `,
     actions: [
@@ -6082,6 +6392,41 @@ async function handleDocumentClick(event) {
         state.settings.memoryCards = state.settings.memoryCards.filter((item) => item.id !== id);
         await saveSettings();
         renderScreen();
+      }
+    }
+    else if (action === "delete-memory") {
+      await dbDelete("memories", id);
+      target.closest(".memory-item")?.remove();
+      toast("记忆已删除");
+    }
+    else if (action === "extract-memories-now") {
+      const character = getById(state.characters, id);
+      const chat = state.currentChat?.members.includes(id)
+        ? state.currentChat
+        : sortByTimeDesc(state.chats.filter((item) => item.members.includes(id)))[0];
+      if (!character || !chat) {
+        toast("这个角色还没有聊天窗口", "error");
+        return;
+      }
+      setBusy(target, true, "提取中…");
+      try {
+        await extractMemoriesForChat(chat, { force: true, characterId: id });
+        openCharacterForm(id);
+        toast("记忆提取完成");
+      } catch (error) {
+        console.warn("手动记忆提取失败", error);
+        toast(`提取失败：${error.message}`, "error");
+      } finally {
+        setBusy(target, false);
+      }
+    }
+    else if (action === "clear-character-memories") {
+      if (await confirmDialog("清空该角色记忆？", "长期记忆会删除，现有聊天记录不会受到影响。")) {
+        const memories = await dbGetByIndex("memories", "characterId", id);
+        for (const memory of memories) await dbDelete("memories", memory.id);
+        state.memoryCounts[id] = 0;
+        openCharacterForm(id);
+        toast("记忆已清空");
       }
     }
     else if (action === "generate-character-moment") {
