@@ -1,0 +1,31 @@
+{
+  "name": "PocketLink · AI 角色扮演小手机",
+  "short_name": "PocketLink",
+  "description": "角色住在手机里的 AI 陪伴终端",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fff8fb",
+  "theme_color": "#ff8fc0",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "消息",
+      "short_name": "消息",
+      "url": "./index.html"
+    },
+    {
+      "name": "档案",
+      "short_name": "档案",
+      "url": "./index.html?route=profile"
+    }
+  ]
+}

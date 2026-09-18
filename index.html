@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ff8fc0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="PocketLink">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>PocketLink · AI 角色扮演小手机</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <style>
+    :root{--load-bg:#fff8fb;--load-fg:#5a4250;--load-acc:#ff8fc0}
+    html,body{min-height:100%;margin:0;background:var(--load-bg);color:var(--load-fg)}
+    body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+    .initial-skeleton{display:grid;gap:10px;padding:24px}
+    .initial-skeleton i{display:block;height:58px;border-radius:18px;background:linear-gradient(90deg,#ffe9f3,#fff0f7,#ffe9f3);background-size:200% 100%;animation:sk 1.4s infinite}
+    .initial-skeleton i:first-child{width:58%;height:28px}
+    @keyframes sk{to{background-position:-200% 0}}
+  </style>
+  <link rel="stylesheet" href="styles.css?v=4">
+</head>
+<body data-theme="strawberry">
+  <div class="desktop-shell">
+    <aside class="theme-rail" aria-label="主题选择器">
+      <div class="brand">
+        <div class="brand-mark">PL</div>
+        <div>
+          <strong>PocketLink</strong>
+          <span>角色陪伴终端</span>
+        </div>
+      </div>
+      <div class="rail-section">
+        <div class="rail-title">
+          <span>主题</span>
+          <button class="mini-btn" data-action="open-theme-manager" title="主题管理">⚙</button>
+        </div>
+        <div id="themeRailList" class="theme-rail-list"></div>
+      </div>
+      <div class="rail-section rail-footer">
+        <button class="rail-action" data-action="open-settings"><span>⚙</span>设置</button>
+        <button class="rail-action" data-action="open-notifications"><span>◉</span>通知中心</button>
+        <button class="rail-action" data-action="lock-app"><span>⌑</span>锁定手机</button>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <section id="phone" class="phone">
+        <div class="phone-hardware">
+          <div class="phone-speaker"></div>
+          <div class="phone-camera"></div>
+        </div>
+        <div class="phone-screen">
+          <header class="status-bar">
+            <span id="statusClock">09:41</span>
+            <span>▮▮▮ ᯤ ▰</span>
+          </header>
+          <div id="screen" class="screen" aria-live="polite">
+            <div class="initial-skeleton"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div id="callOverlay" class="call-overlay hidden" aria-live="polite"></div>
+          <div id="sleepOverlay" class="sleep-overlay hidden" aria-live="polite"></div>
+          <nav id="bottomNav" class="bottom-nav" aria-label="主导航">
+            <button data-route="messages"><span>◫<i id="navUnread" class="nav-dot hidden"></i></span>消息</button>
+            <button data-route="groups"><span>◎</span>群聊</button>
+            <button data-route="dates"><span>◇</span>约会</button>
+            <button data-route="health"><span>♡</span>体征</button>
+            <button data-route="profile"><span>▣</span>档案</button>
+          </nav>
+        </div>
+        <div id="lockScreen" class="lock-screen hidden">
+          <div class="lock-time" id="lockTime">09:41</div>
+          <div class="lock-date" id="lockDate"></div>
+          <div class="lock-brand">PocketLink</div>
+          <button class="lock-open" data-action="unlock-app">轻触解锁</button>
+        </div>
+      </section>
+      <p class="stage-hint">数据仅保存在本机浏览器 · 可双击打开 · API 请求失败时可在设置中启用 Python 代理</p>
+    </main>
+  </div>
+
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true"></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"></div>
+  <div id="toasts" class="toasts"></div>
+  <input id="globalFileInput" class="hidden" type="file">
+  <script src="app.js?v=4" defer></script>
+</body>
+</html>

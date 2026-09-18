@@ -1,0 +1,155 @@
+# PocketLink
+
+PocketLink 是一个纯前端、零构建的 AI 角色扮演小手机。角色、聊天、世界书、预设、API 配置、正则脚本、快捷回复和主题都保存在浏览器 IndexedDB 中。首次启动不会创建任何角色、聊天、世界书或预设，只保留六套内置主题。
+
+## 运行
+
+### 直接打开
+
+双击 `index.html`。应用本身可以运行，但部分模型接口会因为浏览器 CORS 限制而拒绝请求。
+
+### 使用本地服务器与代理
+
+安装 Python 3 后，在 `D:\PocketLink` 执行：
+
+```powershell
+python proxy.py
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:8787/index.html
+```
+
+如果要让浏览器中的 API 请求通过代理，在应用里打开：
+
+```text
+设置 → 代理 → 反向代理地址
+```
+
+填写：
+
+```text
+http://127.0.0.1:8787/proxy
+```
+
+代理默认只监听 `127.0.0.1`，仅使用 Python 标准库，不依赖第三方包。
+
+### 云端网页
+
+项目已经包含 PWA 清单与 Service Worker，可以把整个目录直接上传到 Cloudflare Pages、GitHub Pages、Netlify 或任意静态托管。浏览器直接请求模型接口遇到 CORS 时，可部署 `cloudflare-worker.js` 作为云端代理。详细步骤见 `DEPLOY.md`。
+
+## 当前已完成
+
+- [x] 手机外框、桌面主题栏、移动端响应式布局
+- [x] PWA 清单、Service Worker、图标、添加到主屏幕与离线应用壳
+- [x] 六套内置主题、跟随系统浅色/深色、主题导入与自定义编辑器
+- [x] IndexedDB 数据库与角色、聊天、消息、世界书、预设、API、主题、正则、快捷回复、设置、媒体 store
+- [x] 首次启动空状态与创建引导
+- [x] 消息列表、独立单聊窗口、群聊窗口、置顶、静音、未读、搜索、引用、编辑、删除、重 roll
+- [x] 单聊与群聊持久化，多角色依次发言
+- [x] 群聊导演备注与互不知情私密条目校验，检测到疑似泄露时重生成一次
+- [x] 手动创建角色、AI 文字提炼角色、角色编辑与导出
+- [x] 从相册导入静态头像、短视频动态头像
+- [x] 上传参考图并调用图片/视频模型生成静态或动态头像
+- [x] SillyTavern V3 JSON 角色卡导入
+- [x] PNG `chara` / `ccv3` 角色卡导入
+- [x] 世界书对象索引格式与数组格式导入
+- [x] 世界书条目编辑、常驻、关键词触发、概率、可见性、所属角色、触发测试
+- [x] SillyTavern 预设导入与提示词排序、注入位置、深度、采样参数编辑
+- [x] 正则脚本导入、placement、markdownOnly、promptOnly、minDepth、maxDepth
+- [x] 快捷回复导入与输入栏按钮
+- [x] 文字 API 适配：OpenRouter、DeepSeek、OpenAI、Anthropic、Gemini、GLM、通义、Kimi、MiniMax、自定义
+- [x] 图片与视频通用 HTTP 请求配置，包含 URL、方法、请求头、请求体模板、响应解析路径
+- [x] API 连接测试、默认接口、代理地址与自定义请求头
+- [x] 感知权限表、主动消息规则、冷却、安静时段和通知中心
+- [x] 体征原始数据与感知量转换层
+- [x] 语音录音消息、语音波形、系统 TTS 朗读
+- [x] 从相册向聊天发送图片与视频
+- [x] 用户或角色发送模型生成图片与视频
+- [x] 为某条角色消息一键配图或生成短片，并支持相册参考图
+- [x] 语音通话：麦克风识别、角色文字回复与系统语音朗读
+- [x] 视频通话：前置摄像头预览、角色头像/动态头像画面、模型生成通话场景
+- [x] 约会 beat、选择、结局、好感数值
+- [x] 朋友圈、纪念日与本地日程提醒
+- [x] 锁屏 PIN、存档导出与恢复
+
+## 阶段 A 已修复
+
+- [x] 通话结束后彻底停止语音识别，不再重新启动麦克风监听。
+- [x] 预设提示词顺序改用 `prompt_order[0]`，不再硬编码 SillyTavern 的 `100001`。
+- [x] 群聊私密信息泄露后的重试请求改为合法的 system + history 结构，兼容 Anthropic。
+- [x] 图片、视频、语音改为写入 IndexedDB 的 `media` store，消息只保存 `mediaId`。
+- [x] 数据版本升级到 3，首次启动时自动迁移旧的 dataURL 媒体消息。
+- [x] 主题字体缩放改用 `--font-scale`，不再清空 `body.style.cssText`。
+- [x] 删除消息和聊天时同步删除关联媒体。
+- [x] 清理未使用的 `selectedCharacterIds` 和 `.mobile-install-hint`。
+- [x] Python 与 Cloudflare Worker 代理增加 API 域名白名单，支持 `ALLOWED_HOSTS` 覆盖。
+- [x] 文字接口支持 `text/event-stream` SSE 响应解析。
+- [x] 主动消息可在一个周期内处理多个角色，并支持每周期限流配置。
+
+## 阶段 B 已补充
+
+- [x] B1：五维人格调节，支持理性/感性、幽默/严肃、共情/冷静、主动/被动、直接/含蓄。
+- [x] B2：纪念卡系统，支持约会完成、群聊争执/和解和手动创建。
+- [x] B3：早安与晚安触发，可由角色单独开启并填写自定义要求。
+- [x] B4：哄睡模式，支持雨声、壁炉、海浪与系统 TTS 朗读。
+- [x] B5：真心话、五五开、记忆考验互动问答。
+- [x] B6：角色主动生成朋友圈，并读取用户点赞/评论后在后续聊天中回应。
+- [x] B7：表情、位置卡片和本地娱乐红包消息，钱包金额以“分”为整数。
+- [x] B8：每日回顾，第一次打开应用时总结最近 24 小时聊天，可手动 AI 深化。
+
+## 阶段 C 已补充
+
+- [x] C1：主题日夜模式、浅色主题自动生成夜间变体、主题图标动态生成。
+- [x] C2：安全区、visualViewport 键盘适配、禁用原生下拉刷新、移动端长按消息菜单。
+- [x] C3：首屏骨架屏和关键 CSS 内联；保留 `defer` 以保证 `file://` 双击运行。
+- [x] C4：`deploy.ps1`、`.env.example`、`/health` 健康检查页面和端点。
+- [x] C5：保留手动存档同步方案；自动 D1/KV 同步作为进阶部署方案，不默认启用。
+- [x] C6：统一引用块、details、代码块、行内代码与 emoji fallback。
+
+## 导入格式
+
+“档案 → 系统 → 导入文件”会自动识别以下格式：
+
+- SillyTavern V3 角色卡 JSON
+- SillyTavern PNG 角色卡，优先读取 `ccv3`，其次读取 `chara`
+- SillyTavern 世界书 JSON，支持 `entries` 对象与数组
+- SillyTavern 预设 JSON
+- SillyTavern 主题 JSON
+- SillyTavern 正则脚本 JSON 或脚本数组
+- SillyTavern 快捷回复 JSON
+- PocketLink 完整存档 JSON
+
+角色卡中的 `description` 会原样保存在 `persona`，YAML/XML 富文本不会被解析或重写。
+
+## 已知限制
+
+- 浏览器直接双击打开时，第三方 API 可能触发 CORS；使用 `proxy.py` 可以规避。
+- 图片和视频生成接口差异很大。内置模板提供可编辑起点，实际模型名、URL、请求体和响应路径需要按服务商文档调整。
+- 视频通话采用模型“生成一幕”的方式更新画面，不是逐帧实时模型推流。
+- 自定义 TTS 已保存角色音色与参数，但不同厂商的语音流协议差异较大，目前界面内可直接使用系统 TTS 和录音消息。
+- 手表数据接入采用本地适配层设计。浏览器不能直接读取所有手表数据，需要把已有健康数据转换为 JSON 后导入，或扩展 `settings.health` 的写入入口。
+- 自动摘要需要已配置文字模型。没有模型时会退回本地截断摘要。
+- 群聊互不知情校验是本地规则检查加一次模型重生成，不是形式化隐私证明。
+
+## 文件
+
+- `index.html`：应用外壳
+- `styles.css`：六套主题与全部界面样式
+- `app.js`：IndexedDB、导入、API、聊天、主动消息和所有页面逻辑
+- `proxy.py`：Python 标准库静态服务器和 CORS 代理
+- `cloudflare-worker.js`：可部署到 Cloudflare Workers 的云端 CORS 代理
+- `manifest.webmanifest`、`sw.js`、`icon.svg`：PWA 安装与离线应用壳
+- `DEPLOY.md`：Cloudflare Pages、GitHub Pages 和 Worker 部署步骤
+- `deploy.ps1`、`.env.example`：Cloudflare 一键部署脚本与环境变量模板
+- `health/index.html`：手机与浏览器可访问的健康检查页面
+
+## 进阶部署
+
+默认同步方案是“导出存档 → 网盘或聊天工具传递 → 另一台设备导入”。如果需要手机和电脑自动同步，再单独增加 Cloudflare D1/KV 后端，使用用户自定义 token 和“最后修改时间优先”的冲突处理。自动同步不会默认开启。
+
+## 备份
+
+“档案 → 系统 → 导出存档”会导出 IndexedDB 中的全部 store。恢复存档会替换当前本机数据，操作前应用会再次确认。

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PocketLink Health</title>
+  <style>
+    body{margin:0;padding:24px;background:#fff8fb;color:#5a4250;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+    main{max-width:620px;margin:auto;padding:22px;border:1px solid #ffd0e2;border-radius:18px;background:#fff}
+    h1{font-size:20px}code{color:#ff72b1}.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #ffe0ee}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PocketLink Health</h1>
+    <div class="row"><span>应用版本</span><code>4</code></div>
+    <div class="row"><span>数据库</span><code id="db">检测中</code></div>
+    <div class="row"><span>Service Worker</span><code id="sw">检测中</code></div>
+    <div class="row"><span>默认 API</span><code id="api">仅浏览器本地可见</code></div>
+  </main>
+  <script>
+    document.getElementById("db").textContent = "indexedDB" in window ? "available" : "unavailable";
+    document.getElementById("sw").textContent = "serviceWorker" in navigator ? "available" : "unavailable";
+  </script>
+</body>
+</html>
