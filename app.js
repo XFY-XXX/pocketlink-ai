@@ -4,7 +4,7 @@
 
 const DB_NAME = "pocketlink";
 const DB_VERSION = 1;
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {

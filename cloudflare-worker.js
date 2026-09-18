@@ -43,7 +43,7 @@ export default {
       return Response.json({
         status: "ok",
         app: "PocketLink",
-        version: "4",
+        version: "5",
         database: "browser-indexeddb",
         defaultApiConfigured: null,
         proxy: "ok"
