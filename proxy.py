@@ -16,7 +16,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
 MAX_REQUEST_BODY = 32 * 1024 * 1024
-APP_VERSION = "6"
+APP_VERSION = "7"
 DEFAULT_ALLOWED_HOSTS = {
     "openrouter.ai",
     "api.deepseek.com",

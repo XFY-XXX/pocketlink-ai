@@ -4,7 +4,7 @@
 
 const DB_NAME = "pocketlink";
 const DB_VERSION = 2;
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {
@@ -125,6 +125,86 @@ const BUILTIN_THEMES = [
       font: "\"Inter\",\"Helvetica Neue\",\"PingFang SC\",system-ui,sans-serif",
       shadow: "0 1px 3px rgba(0,0,0,.06)",
       shadowBubble: "0 1px 2px rgba(0,0,0,.04)"
+    }
+  },
+  {
+    id: "xiamingxing",
+    name: "夏鸣星 · 暖橙",
+    builtIn: true,
+    desc: "光与夜之恋 · 橘子汽水的夏天",
+    vars: {
+      bg: "#fff8f0", bg2: "#fff0e0", panel: "#fff5ec", panel2: "#fff9f4", pop: "#ffe7cf",
+      line: "#f0dcc8", line2: "#e0c8b0", fg: "#4a3528", dim: "#a0846c", faint: "#c8b498",
+      acc: "#e6a372", acc2: "#f0c8a0", ok: "#6dbb88", warn: "#e2a63c", err: "#e5564b",
+      me: "linear-gradient(135deg,#f0c8a0,#e6a372)", meFg: "#fff", bubble: "#fff",
+      radius: "24px", radiusBubble: "16px",
+      font: "\"PingFang SC\",\"Hiragino Sans GB\",\"Microsoft YaHei\",system-ui,sans-serif",
+      shadow: "0 24px 54px -30px rgba(190,116,56,.30)",
+      shadowBubble: "0 5px 16px -13px rgba(190,116,56,.45)"
+    }
+  },
+  {
+    id: "zuoran",
+    name: "左然 · 酒红",
+    builtIn: true,
+    desc: "未定事件簿 · 白梅与天平",
+    vars: {
+      bg: "#faf7f5", bg2: "#f5eee8", panel: "#fdfaf8", panel2: "#f8f2ee", pop: "#f0e0dc",
+      line: "#e0d0c8", line2: "#c8b0a8", fg: "#3a2a28", dim: "#8a6a68", faint: "#b09898",
+      acc: "#b14444", acc2: "#c96a6a", ok: "#5f9d72", warn: "#e2a63c", err: "#b84444",
+      me: "#b14444", meFg: "#fff", bubble: "#fff",
+      radius: "12px", radiusBubble: "8px",
+      font: "\"PingFang SC\",\"Hiragino Sans GB\",\"Microsoft YaHei\",system-ui,sans-serif",
+      shadow: "0 12px 34px -26px rgba(90,45,42,.25)",
+      shadowBubble: "0 3px 12px -10px rgba(90,45,42,.32)"
+    }
+  },
+  {
+    id: "shenxinghui",
+    name: "沈星回 · 星河紫",
+    builtIn: true,
+    desc: "恋与深空 · 星辰与光",
+    vars: {
+      bg: "#12101a", bg2: "#1a1628", panel: "#1e1a30", panel2: "#262040", pop: "#302852",
+      line: "#3a3050", line2: "#504070", fg: "#e8e0f8", dim: "#9a8ab8", faint: "#6a5a88",
+      acc: "#a78bfa", acc2: "#8b6cf0", ok: "#6ee7b7", warn: "#e2a63c", err: "#ff5c7a",
+      me: "linear-gradient(135deg,#8b6cf0,#a78bfa)", meFg: "#fff", bubble: "#2a2440",
+      radius: "16px", radiusBubble: "14px",
+      font: "\"PingFang SC\",\"Hiragino Sans GB\",\"Microsoft YaHei\",system-ui,sans-serif",
+      shadow: "0 28px 64px -30px rgba(83,52,170,.72)",
+      shadowBubble: "0 6px 20px -14px rgba(139,108,240,.70)"
+    }
+  },
+  {
+    id: "yiyu",
+    name: "易遇 · 咖啡",
+    builtIn: true,
+    desc: "世界之外 · 咖啡与钢笔",
+    vars: {
+      bg: "#faf6f0", bg2: "#f2e8dc", panel: "#fdfaf6", panel2: "#f7f0e6", pop: "#eadcc8",
+      line: "#e0d0bc", line2: "#c8b094", fg: "#2c1e12", dim: "#7a5c3c", faint: "#a88a68",
+      acc: "#6b4a2f", acc2: "#a67c52", ok: "#6f9a69", warn: "#e2a63c", err: "#a94e3c",
+      me: "linear-gradient(135deg,#a67c52,#6b4a2f)", meFg: "#fff", bubble: "#fff",
+      radius: "10px", radiusBubble: "7px",
+      font: "\"PingFang SC\",\"Hiragino Sans GB\",\"Microsoft YaHei\",system-ui,sans-serif",
+      shadow: "0 14px 38px -30px rgba(72,48,28,.34)",
+      shadowBubble: "0 3px 12px -10px rgba(72,48,28,.38)"
+    }
+  },
+  {
+    id: "baiqi",
+    name: "白起 · 红黑",
+    builtIn: true,
+    desc: "恋与制作人 · 风与银杏",
+    vars: {
+      bg: "#0e0c0c", bg2: "#161212", panel: "#1a1616", panel2: "#241e1e", pop: "#302626",
+      line: "#3a2828", line2: "#503838", fg: "#f0e8e8", dim: "#a89090", faint: "#785858",
+      acc: "#c8322a", acc2: "#e05a50", ok: "#58b77a", warn: "#e2a63c", err: "#ff4d4d",
+      me: "#c8322a", meFg: "#fff", bubble: "#2a2222",
+      radius: "8px", radiusBubble: "6px",
+      font: "\"PingFang SC\",\"Hiragino Sans GB\",\"Microsoft YaHei\",system-ui,sans-serif",
+      shadow: "0 28px 62px -30px rgba(125,20,17,.72)",
+      shadowBubble: "0 5px 18px -14px rgba(200,50,42,.62)"
     }
   }
 ];
