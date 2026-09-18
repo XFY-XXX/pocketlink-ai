@@ -123,7 +123,7 @@ const BUILTIN_THEMES = [
 const API_CATALOG = {
   text: [
     { provider: "openrouter", name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4.1", hint: "OpenAI 兼容，可使用多种上游模型。" },
-    { provider: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", hint: "默认端点 /chat/completions。" },
+    { provider: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", hint: "默认端点 /chat/completions；默认关闭思考模式以启用采样参数。", reasoningMode: "off", reasoningEffort: "high" },
     { provider: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-5.5", hint: "OpenAI 原生兼容接口。" },
     { provider: "anthropic", name: "Anthropic Claude", baseUrl: "https://api.anthropic.com", model: "claude-opus-4.6", hint: "使用 /v1/messages 格式。" },
     { provider: "gemini", name: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3-pro-preview", hint: "使用 generateContent 格式。" },
@@ -252,7 +252,8 @@ const state = {
   recordedChunks: [],
   recordingStartedAt: 0,
   searchQuery: "",
-  profileTab: "characters",
+  profileTab: "overview",
+  contentTab: "characters",
   apiTab: "text",
   healthPerceptions: [],
   suppressProactiveOnce: false,
@@ -633,7 +634,38 @@ function defaultApiConfig(category = "text", template = {}) {
       temperature: null, top_p: null, max_tokens: null,
       frequency_penalty: null, presence_penalty: null, top_k: null
     },
+    reasoning: {
+      mode: template.reasoningMode || "auto",
+      effort: template.reasoningEffort || "high"
+    },
     lastTestedAt: 0, lastTestResult: ""
+  };
+}
+
+function normalizeApiConfig(config) {
+  return {
+    ...config,
+    requestTemplate: {
+      method: "POST",
+      headers: {},
+      bodyTemplate: "",
+      responsePath: "",
+      ...(config.requestTemplate || {})
+    },
+    sampling: {
+      temperature: null,
+      top_p: null,
+      max_tokens: null,
+      frequency_penalty: null,
+      presence_penalty: null,
+      top_k: null,
+      ...(config.sampling || {})
+    },
+    reasoning: {
+      mode: "auto",
+      effort: "high",
+      ...(config.reasoning || {})
+    }
   };
 }
 
@@ -831,7 +863,7 @@ async function loadAllData() {
   state.chats = sortByTimeDesc(chats);
   state.worldbooks = worldbooks.sort((a, b) => b.updatedAt - a.updatedAt);
   state.presets = presets.sort((a, b) => b.updatedAt - a.updatedAt);
-  state.apiConfigs = apiConfigs.sort((a, b) => b.updatedAt - a.updatedAt);
+  state.apiConfigs = apiConfigs.map(normalizeApiConfig).sort((a, b) => b.updatedAt - a.updatedAt);
   state.themes = themes.sort((a, b) => Number(b.builtIn) - Number(a.builtIn) || a.name.localeCompare(b.name, "zh-CN"));
   state.regexScripts = regexScripts.sort((a, b) => b.updatedAt - a.updatedAt);
   state.quickReplies = quickReplies.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1729,14 +1761,15 @@ async function importFile(file, kind = "auto") {
     await sendChatMediaFile(file, kind === "chat-image" ? "image" : "video");
     return;
   }
-  if (kind === "character-png" || ((kind === "auto" || kind === "character") && extension === "png")) {
+  if (kind === "character-png" || ((kind === "auto" || kind === "character") && (extension === "png" || file.type === "image/png"))) {
     const rawText = await extractCharacterJsonFromPng(file);
     const json = JSON.parse(rawText);
     const character = characterFromTavern(json, json, "tavern_png_v3");
     await saveImportedCharacter(character, json);
     toast(`角色卡 ${character.name || "未命名角色"} 已导入`);
     await refreshAll();
-    state.profileTab = "characters";
+    state.contentTab = "characters";
+    state.profileTab = "content";
     navigate("profile");
     return;
   }
@@ -1939,6 +1972,13 @@ function textEndpoint(config) {
 
 function buildTextRequest(config, messages, options = {}) {
   const sampling = { ...config.sampling, ...(options.sampling || {}) };
+  const reasoning = {
+    mode: "auto",
+    effort: "high",
+    ...(config.reasoning || {}),
+    ...(options.reasoning || {})
+  };
+  const reasoningBudget = reasoning.effort === "low" ? 4096 : reasoning.effort === "max" ? 16384 : 8192;
   const headers = { "Content-Type": "application/json", ...(config.requestTemplate?.headers || {}) };
   let url = textEndpoint(config);
   let body;
@@ -1954,6 +1994,10 @@ function buildTextRequest(config, messages, options = {}) {
       top_p: sampling.top_p ?? undefined,
       top_k: sampling.top_k ?? undefined
     };
+    if (reasoning.mode === "on") {
+      body.thinking = { type: "enabled", budget_tokens: reasoningBudget };
+      body.max_tokens = Math.max(body.max_tokens, reasoningBudget + 1024);
+    }
   } else if (config.provider === "gemini") {
     url += `${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(config.apiKey)}`;
     body = {
@@ -1969,12 +2013,19 @@ function buildTextRequest(config, messages, options = {}) {
         maxOutputTokens: sampling.max_tokens || 4096
       }
     };
+    if (reasoning.mode !== "auto") {
+      body.generationConfig.thinkingConfig = {
+        thinkingBudget: reasoning.mode === "off" ? 0 : reasoningBudget
+      };
+    }
   } else if (config.provider === "custom" && config.requestTemplate?.bodyTemplate) {
     const contextText = messages.map((item) => `${item.role}: ${item.content}`).join("\n\n");
     const template = config.requestTemplate.bodyTemplate
       .replaceAll("{{model}}", config.model || "")
       .replaceAll("{{prompt}}", contextText)
-      .replaceAll("{{apiKey}}", config.apiKey || "");
+      .replaceAll("{{apiKey}}", config.apiKey || "")
+      .replaceAll("{{reasoningMode}}", reasoning.mode)
+      .replaceAll("{{reasoningEffort}}", reasoning.effort);
     body = parseJsonSafe(template, { model: config.model, messages });
   } else {
     headers.Authorization = `Bearer ${config.apiKey}`;
@@ -1982,7 +2033,7 @@ function buildTextRequest(config, messages, options = {}) {
       headers["HTTP-Referer"] = location.href.startsWith("file:") ? "https://pocketlink.local" : location.href;
       headers["X-Title"] = "PocketLink";
     }
-    body = {
+    const openAiBody = {
       model: config.model,
       messages,
       temperature: sampling.temperature ?? undefined,
@@ -1993,6 +2044,29 @@ function buildTextRequest(config, messages, options = {}) {
       top_k: sampling.top_k ?? undefined,
       stream: false
     };
+    if (config.provider === "deepseek") {
+      if (reasoning.mode === "off") {
+        openAiBody.thinking = { type: "disabled" };
+        delete openAiBody.top_p;
+      } else {
+        openAiBody.thinking = { type: "enabled" };
+        openAiBody.reasoning_effort = reasoning.effort;
+        delete openAiBody.temperature;
+        delete openAiBody.frequency_penalty;
+        delete openAiBody.presence_penalty;
+        if (openAiBody.top_p !== undefined) openAiBody.top_p = Math.max(.95, openAiBody.top_p);
+      }
+    } else if (config.provider === "openrouter") {
+      openAiBody.reasoning = {
+        enabled: reasoning.mode !== "off",
+        ...(reasoning.mode === "on" ? { effort: reasoning.effort } : {})
+      };
+    } else if (reasoning.mode === "off") {
+      openAiBody.reasoning_effort = "none";
+    } else if (reasoning.mode === "on") {
+      openAiBody.reasoning_effort = reasoning.effort;
+    }
+    body = openAiBody;
   }
   return { url, headers, body };
 }
@@ -2512,7 +2586,7 @@ async function generateCharacterReply(chat, character, options = {}) {
   const config = getApiConfig(chat.modelOverride) || getDefaultApi("text");
   if (!config) {
     if (options.background) console.warn("主动消息跳过：未配置文字模型");
-    else toast("请先前往“档案 → API 配置”添加文字模型", "error", 4200);
+    else toast("请先前往“设置 → 模型 → API 配置”添加文字模型", "error", 4200);
     return null;
   }
   if (!options.background) {
@@ -3022,6 +3096,198 @@ function renderHealthPage() {
 }
 
 function renderProfilePage() {
+  const tabs = [
+    ["overview", "概览"],
+    ["content", "内容"],
+    ["models", "模型"],
+    ["appearance", "外观"],
+    ["data", "数据"]
+  ];
+  const unreadNotifications = state.settings.notifications.filter((item) => !item.read).length;
+  let content = "";
+
+  if (state.profileTab === "overview") {
+    content = `
+      <div class="dashboard-intro">
+        <div>
+          <span>POCKETLINK</span>
+          <h2>角色陪伴终端</h2>
+          <p>先配置模型，再创建角色。所有数据只保存在这台设备。</p>
+        </div>
+        <div class="dashboard-orbit">PL</div>
+      </div>
+      <div class="dashboard-grid">
+        <button class="dashboard-card primary" data-action="profile-tab" data-tab="models">
+          <span class="dashboard-icon">⇄</span>
+          <strong>API 与模型</strong>
+          <small>${state.apiConfigs.filter((item) => item.category === "text").length} 个文字模型 · 点击配置</small>
+        </button>
+        <button class="dashboard-card" data-action="profile-tab" data-tab="content">
+          <span class="dashboard-icon">✦</span>
+          <strong>创作资源</strong>
+          <small>${state.characters.length} 角色 · ${state.worldbooks.length} 世界书 · ${state.presets.length} 预设</small>
+        </button>
+        <button class="dashboard-card" data-action="open-theme-manager">
+          <span class="dashboard-icon">◐</span>
+          <strong>主题外观</strong>
+          <small>六套主题、日夜模式和字体</small>
+        </button>
+        <button class="dashboard-card" data-action="open-settings">
+          <span class="dashboard-icon">⚙</span>
+          <strong>应用设置</strong>
+          <small>聊天、代理、锁屏和主动消息</small>
+        </button>
+      </div>
+      <div class="surface">
+        <div class="surface-title"><strong>最近状态</strong><span>本机数据</span></div>
+        <div class="grid three">
+          <div class="metric"><strong>${state.chats.length}</strong><span>聊天窗口</span></div>
+          <div class="metric"><strong>${state.settings.memoryCards?.length || 0}</strong><span>纪念卡</span></div>
+          <div class="metric"><strong>${unreadNotifications}</strong><span>未读通知</span></div>
+        </div>
+      </div>`;
+  } else if (state.profileTab === "content") {
+    content = `
+      <div class="section-heading"><div><strong>创作资源</strong><span>角色卡、世界书和提示词集中管理</span></div></div>
+      <div class="content-resource-grid">
+        ${renderContentResourceCard("characters", "☺", "角色库", state.characters.length, "角色人设、头像、开场白和主动消息")}
+        ${renderContentResourceCard("worldbooks", "▤", "世界书", state.worldbooks.length, "关键词、常驻条目和私密可见性")}
+        ${renderContentResourceCard("presets", "≡", "提示词预设", state.presets.length, "提示词顺序、注入位置和采样参数")}
+        ${renderContentResourceCard("regex", "/.*/", "正则脚本", state.regexScripts.length, "状态栏、选择器和内容清洗")}
+        ${renderContentResourceCard("quick", "⌘", "快捷回复", state.quickReplies.length, "聊天输入栏的一键按钮")}
+        ${renderContentResourceCard("memories", "✦", "纪念卡", state.settings.memoryCards?.length || 0, "约会和关系里程碑")}
+      </div>
+      <div class="surface">
+        <div class="surface-title"><strong>导入</strong><span>从现有素材快速开始</span></div>
+        <div class="card-actions">
+          <button class="btn primary" data-action="import-character-json">JSON 角色卡</button>
+          <button class="btn" data-action="import-character-png">PNG 角色卡</button>
+          <button class="btn" data-action="import-file" data-import-kind="worldbook">世界书</button>
+          <button class="btn" data-action="import-file" data-import-kind="preset">预设</button>
+        </div>
+      </div>`;
+  } else if (state.profileTab === "models") {
+    const textConfigs = state.apiConfigs.filter((item) => item.category === "text");
+    const imageConfigs = state.apiConfigs.filter((item) => item.category === "image");
+    const videoConfigs = state.apiConfigs.filter((item) => item.category === "video");
+    content = `
+      <div class="section-heading"><div><strong>API 与模型</strong><span>让聊天、图片和通话真正连上网络</span></div><button class="btn primary small" data-action="open-api-manager">配置模型</button></div>
+      <div class="surface">
+        <div class="surface-title"><strong>默认接口</strong><span>聊天会优先使用</span></div>
+        <div class="menu-list">
+          ${renderDefaultApiRow("text", "文字模型", state.settings.defaultTextApiId, textConfigs)}
+          ${renderDefaultApiRow("image", "图片模型", state.settings.defaultImageApiId, imageConfigs)}
+          ${renderDefaultApiRow("video", "视频模型", state.settings.defaultVideoApiId, videoConfigs)}
+        </div>
+      </div>
+      <div class="surface">
+        <div class="surface-title"><strong>DeepSeek 提示</strong><span>已核实官方行为</span></div>
+        <div class="field-hint">DeepSeek 默认开启思考模式。开启时 temperature、presence_penalty、frequency_penalty 会被忽略。需要采样参数时，在接口编辑里选择“关闭思考”。</div>
+      </div>`;
+  } else if (state.profileTab === "appearance") {
+    content = `
+      <div class="section-heading"><div><strong>主题外观</strong><span>选择主题并打开完整外观设置</span></div><button class="btn small" data-action="open-settings">详细设置</button></div>
+      <div class="theme-card-grid">${state.themes.map(renderThemeCard).join("")}</div>`;
+  } else {
+    content = `
+      <div class="section-heading"><div><strong>数据与工具</strong><span>备份、日程和本机功能</span></div></div>
+      <div class="menu-list">
+        <button class="menu-item" data-action="export-backup"><span class="menu-icon">↑</span><span><strong>导出存档</strong><small>备份全部本机数据</small></span><span>›</span></button>
+        <button class="menu-item" data-action="import-file" data-import-kind="backup"><span class="menu-icon">↺</span><span><strong>恢复存档</strong><small>导入另一台设备的备份</small></span><span>›</span></button>
+        <button class="menu-item" data-action="open-notifications"><span class="menu-icon">◉</span><span><strong>通知中心</strong><small>${unreadNotifications} 条未读</small></span><span>›</span></button>
+        <button class="menu-item" data-action="open-moments"><span class="menu-icon">◎</span><span><strong>朋友圈</strong><small>${state.settings.moments?.length || 0} 条动态</small></span><span>›</span></button>
+        <button class="menu-item" data-action="open-schedules"><span class="menu-icon">◷</span><span><strong>纪念日与日程</strong><small>${state.settings.schedules?.length || 0} 个提醒</small></span><span>›</span></button>
+        <button class="menu-item" data-action="open-wallet"><span class="menu-icon">¥</span><span><strong>娱乐钱包</strong><small>${formatMoney(state.settings.walletBalanceFen || 0)}</small></span><span>›</span></button>
+      </div>
+      <div class="surface">
+        <div class="surface-title"><strong>隐私说明</strong><span>本机优先</span></div>
+        <div class="field-hint">角色、聊天和 API Key 保存在浏览器 IndexedDB。公开仓库不会包含你的聊天或密钥。</div>
+      </div>`;
+  }
+
+  return `
+    <div class="page">
+      <header class="topbar">
+        <div class="topbar-main"><div class="topbar-title">设置</div><div class="topbar-subtitle">模型、内容与本机数据</div></div>
+        <button class="icon-btn" data-action="open-notifications" title="通知">◉</button>
+        <button class="icon-btn" data-action="open-settings" title="更多设置">⚙</button>
+      </header>
+      <div class="tabs">${tabs.map(([id, label]) => `<button class="tab ${state.profileTab === id ? "active" : ""}" data-action="profile-tab" data-tab="${id}">${label}</button>`).join("")}</div>
+      <div class="page-scroll page-content">${content}</div>
+    </div>`;
+}
+
+function renderContentResourceCard(tab, icon, title, count, description) {
+  return `
+    <button class="content-resource-card" data-action="open-content-manager" data-tab="${escapeAttr(tab)}">
+      <span class="content-resource-icon">${icon}</span>
+      <span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(description)}</small></span>
+      <b>${count}</b>
+    </button>`;
+}
+
+function renderDefaultApiRow(category, label, defaultId, configs) {
+  const config = getById(configs, defaultId) || configs.find((item) => item.enabled);
+  const detail = config ? `${config.name || config.provider} · ${config.model}` : "尚未配置";
+  return `<button class="menu-item" data-action="open-api-manager-category" data-category="${escapeAttr(category)}"><span class="menu-icon">${category === "text" ? "文" : category === "image" ? "图" : "影"}</span><span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></span><span>›</span></button>`;
+}
+
+function openContentManager(tab = "characters") {
+  state.contentTab = tab;
+  openModal({
+    title: "创作资源",
+    size: "wide",
+    body: renderContentManagerBody()
+  });
+}
+
+function renderContentManagerBody() {
+  const tabs = [
+    ["characters", "角色"],
+    ["worldbooks", "世界书"],
+    ["presets", "预设"],
+    ["regex", "正则"],
+    ["quick", "快捷"],
+    ["memories", "纪念卡"]
+  ];
+  return `
+    <div class="tabs" style="padding:0 0 12px">${tabs.map(([id, label]) => `<button type="button" class="tab ${state.contentTab === id ? "active" : ""}" data-action="content-tab" data-tab="${id}">${label}</button>`).join("")}</div>
+    <div id="contentManagerList">${renderContentManagerList()}</div>
+  `;
+}
+
+function renderContentManagerList() {
+  if (state.contentTab === "characters") {
+    return state.characters.length
+      ? state.characters.map(renderCharacterCard).join("")
+      : `<div class="empty-state" style="min-height:300px"><div class="empty-illustration">☺</div><h2>角色库为空</h2><p>可以手动创建，也可以从相册导入 PNG 角色卡。</p><div class="empty-actions"><button class="btn primary" data-action="create-character">手动创建</button><button class="btn" data-action="import-character-png">导入 PNG</button></div></div>`;
+  }
+  if (state.contentTab === "worldbooks") {
+    return state.worldbooks.length
+      ? state.worldbooks.map((book) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(book.name || "未命名世界书")}</strong><small>${book.entries.length} 条 · ${escapeHtml(book.description || "无描述")}</small></div><span class="tag">${escapeHtml(book.rawFormat || "manual")}</span></div><div class="card-actions"><button class="btn small primary" data-action="manage-worldbook" data-id="${escapeAttr(book.id)}">编辑</button><button class="btn small" data-action="test-worldbook" data-id="${escapeAttr(book.id)}">触发测试</button><button class="btn small" data-action="export-worldbook" data-id="${escapeAttr(book.id)}">导出</button><button class="btn small danger" data-action="delete-worldbook" data-id="${escapeAttr(book.id)}">删除</button></div></article>`).join("")
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">▤</div><h2>世界书为空</h2><p>支持 SillyTavern 对象索引和数组格式。</p><button class="btn primary" data-action="create-worldbook">新建世界书</button></div>`;
+  }
+  if (state.contentTab === "presets") {
+    return state.presets.length
+      ? state.presets.map((preset) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(preset.name || "未命名预设")}</strong><small>${preset.prompts.length} 条提示词 · 上下文 ${preset.openai_max_context}</small></div></div><div class="card-actions"><button class="btn small primary" data-action="manage-preset" data-id="${escapeAttr(preset.id)}">编辑</button><button class="btn small" data-action="set-default-preset" data-id="${escapeAttr(preset.id)}">设为默认</button><button class="btn small danger" data-action="delete-preset" data-id="${escapeAttr(preset.id)}">删除</button></div></article>`).join("")
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">≡</div><h2>预设为空</h2><p>控制提示词顺序、注入位置和采样参数。</p><button class="btn primary" data-action="create-preset">新建预设</button></div>`;
+  }
+  if (state.contentTab === "regex") {
+    return state.regexScripts.length
+      ? state.regexScripts.map((script) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(script.scriptName || "未命名脚本")}</strong><small>placement ${script.placement.join(",")} · ${script.disabled ? "停用" : "启用"}</small></div></div><div class="entry-preview" style="margin-top:8px">${escapeHtml(script.findRegex)}</div><div class="card-actions"><button class="btn small primary" data-action="edit-regex" data-id="${escapeAttr(script.id)}">编辑</button><button class="btn small" data-action="toggle-regex" data-id="${escapeAttr(script.id)}">${script.disabled ? "启用" : "停用"}</button><button class="btn small danger" data-action="delete-regex" data-id="${escapeAttr(script.id)}">删除</button></div></article>`).join("")
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">/.*/</div><h2>没有正则脚本</h2><p>用于状态栏、选择器和提示词处理。</p><button class="btn primary" data-action="create-regex">新建脚本</button></div>`;
+  }
+  if (state.contentTab === "quick") {
+    return state.quickReplies.length
+      ? state.quickReplies.map((group) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(group.name || "未命名快捷组")}</strong><small>${group.qrList.length} 个按钮 · ${state.settings.activeQuickReplyIds.includes(group.id) ? "聊天中显示" : "未启用"}</small></div></div><div class="card-actions"><button class="btn small primary" data-action="edit-quick" data-id="${escapeAttr(group.id)}">编辑</button><button class="btn small" data-action="toggle-quick-group" data-id="${escapeAttr(group.id)}">${state.settings.activeQuickReplyIds.includes(group.id) ? "停用" : "启用"}</button><button class="btn small danger" data-action="delete-quick" data-id="${escapeAttr(group.id)}">删除</button></div></article>`).join("")
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">⌘</div><h2>没有快捷回复</h2><button class="btn primary" data-action="create-quick">新建快捷组</button></div>`;
+  }
+  return state.settings.memoryCards.length
+    ? state.settings.memoryCards.map(renderMemoryCard).join("")
+    : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">✦</div><h2>还没有纪念卡</h2><p>在聊天菜单里选择“这一刻值得记住”。</p></div>`;
+}
+
+function renderProfilePageLegacy() {
   const unreadNotifications = state.settings.notifications.filter((item) => !item.read).length;
   const tabs = [
     ["characters", "角色"], ["worldbooks", "世界书"], ["presets", "预设"],
@@ -3037,7 +3303,8 @@ function renderProfilePage() {
         <div class="empty-actions">
           <button class="btn primary" data-action="create-character">手动创建</button>
           <button class="btn" data-action="create-character-from-text">文字创建</button>
-          <button class="btn" data-action="import-file" data-import-kind="character">导入角色卡</button>
+          <button class="btn" data-action="import-character-json">导入 JSON 角色卡</button>
+          <button class="btn" data-action="import-character-png">从相册导入 PNG</button>
         </div>
       </div>`;
   } else if (state.profileTab === "worldbooks") {
@@ -3101,7 +3368,7 @@ function renderProfilePage() {
   return `
     <div class="page">
       <header class="topbar">
-        <div class="topbar-main"><div class="topbar-title">档案</div><div class="topbar-subtitle">本机数据与创作资源</div></div>
+        <div class="topbar-main"><div class="topbar-title">设置</div><div class="topbar-subtitle">本机数据与创作资源</div></div>
         <button class="icon-btn" data-action="open-notifications" title="通知">◉</button>
         <button class="icon-btn" data-action="open-settings" title="设置">⚙</button>
       </header>
@@ -3251,7 +3518,8 @@ function openCreateSheet() {
     { icon: "☺", title: "创建角色", subtitle: "手动填写人设与开场白", action: "create-character" },
     { icon: "⌁", title: "创建群聊", subtitle: "选择多个角色建立群聊", action: "create-group" },
     { icon: "✉", title: "与现有角色开新对话", subtitle: "同一角色可以拥有多个独立聊天", action: "new-chat-existing" },
-    { icon: "↓", title: "导入角色卡 / 文件", subtitle: "JSON、PNG 与 SillyTavern 格式", action: "import-file", id: "auto" },
+    { icon: "↓", title: "导入 JSON 角色卡", subtitle: "SillyTavern V2 / V3 JSON", action: "import-character-json" },
+    { icon: "▧", title: "从相册导入 PNG 角色卡", subtitle: "选择相册或文件中的 PNG", action: "import-character-png" },
     { icon: "✦", title: "粘贴文字创建角色", subtitle: "由已配置模型提炼人设字段", action: "create-character-from-text" },
     { icon: "◉", title: "发布朋友圈", subtitle: "记录一条只在本地保存的动态", action: "create-moment" }
   ]);
@@ -3529,7 +3797,8 @@ function openCharacterForm(characterId = null) {
               await createSingleChat(target.id, target.firstMessage);
               return;
             }
-            state.profileTab = "characters";
+            state.contentTab = "characters";
+            state.profileTab = "content";
             navigate("profile");
           } else {
             toast("角色已保存");
@@ -3636,7 +3905,7 @@ function fileToDataUrl(file) {
 function openCharacterFromText() {
   const config = getDefaultApi("text");
   if (!config) {
-    toast("请先在档案中配置文字模型", "error");
+    toast("请先在设置中配置文字模型", "error");
     return;
   }
   openModal({
@@ -3677,7 +3946,8 @@ function openCharacterFromText() {
             });
             await saveCharacter(character);
             closeModal();
-            state.profileTab = "characters";
+            state.contentTab = "characters";
+            state.profileTab = "content";
             navigate("profile");
             setTimeout(() => openCharacterForm(character.id), 0);
           } catch (error) {
@@ -4039,7 +4309,7 @@ function renderApiManagerBody() {
     ${configs.length ? configs.map((config) => `
       <article class="api-card">
         <div class="card-head">
-          <div class="card-head-main"><strong>${escapeHtml(config.name || config.provider)}</strong><small>${escapeHtml(config.model || "未填写模型")} · ${config.lastTestResult ? `最近测试：${escapeHtml(config.lastTestResult)}` : "尚未测试"}</small></div>
+          <div class="card-head-main"><strong>${escapeHtml(config.name || config.provider)}</strong><small>${escapeHtml(config.model || "未填写模型")} ${config.category === "text" ? `· 思考：${config.reasoning?.mode === "off" ? "关闭" : config.reasoning?.mode === "on" ? "开启" : "自动"}` : ""} · ${config.lastTestResult ? `最近测试：${escapeHtml(config.lastTestResult)}` : "尚未测试"}</small></div>
           <span class="tag ${config.enabled ? "acc" : ""}">${config.enabled ? "启用" : "停用"}</span>
         </div>
         <div class="card-actions">
@@ -4078,7 +4348,10 @@ function openApiEditor(config) {
         ${renderFormField("top_p", "top_p", config.sampling.top_p ?? "", { type: "number", step: "0.01" })}
         ${renderFormField("max_tokens", "max_tokens", config.sampling.max_tokens ?? "", { type: "number" })}
         ${renderFormField("top_k", "top_k", config.sampling.top_k ?? "", { type: "number" })}
+        ${config.category === "text" ? renderFormField("思考模式", "reasoningMode", config.reasoning?.mode || "auto", { type: "select", options: [["auto", "自动 / 使用模型默认"], ["off", "关闭思考"], ["on", "开启思考"]] }) : ""}
+        ${config.category === "text" ? renderFormField("思考强度", "reasoningEffort", config.reasoning?.effort || "high", { type: "select", options: [["low", "低"], ["high", "高"], ["max", "最高"]] }) : ""}
       </div>
+      ${config.category === "text" ? `<div class="surface" style="margin-top:14px"><div class="surface-title"><strong>DeepSeek 采样兼容</strong><span>官方行为</span></div><div class="field-hint">DeepSeek 思考模式默认开启。开启时 temperature、presence_penalty、frequency_penalty 会被忽略，top_p 最低按 0.95 生效；关闭思考后 temperature 等采样参数恢复。选择“关闭思考”会发送 <code>thinking: {type:"disabled"}</code>。</div></div>` : ""}
       <div class="surface" style="margin-top:14px">
         <div class="surface-title"><strong>通用 HTTP 请求</strong><span>支持 {{model}}、{{prompt}}、{{apiKey}}、{{referenceImage}}</span></div>
         <div class="form-grid">
@@ -4109,6 +4382,10 @@ function openApiEditor(config) {
             top_p: data.top_p === "" ? null : toNumber(data.top_p),
             max_tokens: data.max_tokens === "" ? null : toNumber(data.max_tokens),
             top_k: data.top_k === "" ? null : toNumber(data.top_k)
+          };
+          config.reasoning = {
+            mode: data.reasoningMode || "auto",
+            effort: data.reasoningEffort || "high"
           };
           config.requestTemplate = {
             method: data.method || "POST",
@@ -4632,6 +4909,21 @@ function normalizeHex(value) {
   if (/^#[0-9a-f]{6}$/i.test(source)) return source;
   if (/^#[0-9a-f]{3}$/i.test(source)) return `#${source.slice(1).split("").map((char) => char + char).join("")}`;
   return "#888888";
+}
+
+function openThemeManager() {
+  openModal({
+    title: "主题外观",
+    size: "wide",
+    body: `
+      <div class="theme-card-grid">${state.themes.map(renderThemeCard).join("")}</div>
+      <div class="card-actions" style="margin-top:12px">
+        <button type="button" class="btn primary" data-action="create-theme">自定义主题</button>
+        <button type="button" class="btn" data-action="import-file" data-import-kind="theme">导入主题</button>
+        <button type="button" class="btn" data-action="open-settings">字体、日夜模式等设置</button>
+      </div>
+    `
+  });
 }
 
 function openThemeEditor() {
@@ -5662,9 +5954,19 @@ async function handleDocumentClick(event) {
     else if (action === "lock-app") lockApp();
     else if (action === "unlock-app") unlockApp();
     else if (action === "select-theme") selectTheme(target.dataset.themeId);
-    else if (action === "open-theme-manager") { state.profileTab = "themes"; navigate("profile"); }
+    else if (action === "open-theme-manager") openThemeManager();
     else if (action === "profile-tab") { state.profileTab = target.dataset.tab; renderScreen(); }
+    else if (action === "open-content-manager") openContentManager(target.dataset.tab || "characters");
+    else if (action === "content-tab") {
+      state.contentTab = target.dataset.tab || "characters";
+      const managerList = $("#contentManagerList");
+      if (managerList) managerList.innerHTML = renderContentManagerList();
+      $$("[data-action=content-tab]", $("#modal")).forEach((button) => button.classList.toggle("active", button.dataset.tab === state.contentTab));
+    }
+    else if (action === "open-api-manager-category") openApiManager(target.dataset.category || "text");
     else if (action === "import-file") pickFile(target.dataset.importKind || "auto", target.dataset.importKind === "character" ? ".json,.png,application/json,image/png" : ".json,application/json");
+    else if (action === "import-character-json") pickFile("character", ".json,application/json");
+    else if (action === "import-character-png") pickFile("character-png", ".png,image/png,image/*");
     else if (action === "create-character") { closeSheet(); openCharacterForm(); }
     else if (action === "create-character-from-text") { closeSheet(); openCharacterFromText(); }
     else if (action === "new-chat-existing") { closeSheet(); openNewChatPicker(); }
@@ -5846,7 +6148,7 @@ async function handleDocumentClick(event) {
         }
       }
     }
-    else if (action === "manage-quick-replies") { state.profileTab = "quick"; navigate("profile"); }
+    else if (action === "manage-quick-replies") openContentManager("quick");
     else if (action === "create-worldbook") openWorldbookForm();
     else if (action === "manage-worldbook") openWorldbookForm(id);
     else if (action === "test-worldbook") openWorldbookTest(id);
