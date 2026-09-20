@@ -4,7 +4,7 @@
 
 const DB_NAME = "pocketlink";
 const DB_VERSION = 2;
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {
@@ -793,6 +793,12 @@ function defaultChat(type, members, title = "") {
     type, members, title, unread: 0, pinned: false, muted: false,
     archived: false, draft: "", messages: [], summary: "", lastMemoryExtractAt: 0,
     summaryUpdatedAt: 0, summaryCoversUpTo: 0, memory: [],
+    contextStats: {
+      summaryPromptTokens: 0,
+      summaryCompletionTokens: 0,
+      memoryPromptTokens: 0,
+      memoryCompletionTokens: 0
+    },
     modelOverride: null, presetOverride: null, systemPromptExtra: "",
     groupState: type === "group" ? {
       lastSpeakerId: null, turnOrder: [...members], directorNote: "",
@@ -959,7 +965,14 @@ async function loadAllData() {
   state.characters = characters.map(normalizeCharacterRecord).sort((a, b) => b.updatedAt - a.updatedAt);
   state.chats = sortByTimeDesc(chats.map((chat) => ({
     ...chat,
-    lastMemoryExtractAt: toNumber(chat.lastMemoryExtractAt, 0)
+    lastMemoryExtractAt: toNumber(chat.lastMemoryExtractAt, 0),
+    contextStats: {
+      summaryPromptTokens: 0,
+      summaryCompletionTokens: 0,
+      memoryPromptTokens: 0,
+      memoryCompletionTokens: 0,
+      ...(chat.contextStats || {})
+    }
   })));
   state.worldbooks = worldbooks.sort((a, b) => b.updatedAt - a.updatedAt);
   state.presets = presets.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1394,6 +1407,8 @@ function renderChatPage() {
   const members = chat.members.map((id) => getById(state.characters, id)).filter(Boolean);
   const typing = [...state.typingCharIds].map((id) => getById(state.characters, id)?.name).filter(Boolean);
   const memoryCount = toNumber(state.memoryCounts[chat.members[0]], 0);
+  const summaryCovered = clamp(toNumber(chat.summaryCoversUpTo, 0), 0, state.currentMessages.length);
+  const summaryStatus = chat.summary ? `摘要 ${summaryCovered}/${state.currentMessages.length}` : "";
   const groupState = chat.groupState;
   const quickGroups = state.quickReplies.filter((item) => state.settings.activeQuickReplyIds.includes(item.id));
   const quickButtons = quickGroups.flatMap((group) => group.qrList.filter((item) => !item.isHidden).slice(0, 8).map((item) => ({ group, item })));
@@ -1403,7 +1418,7 @@ function renderChatPage() {
         <button class="icon-btn" data-action="back-from-chat" title="返回">‹</button>
         <div class="chat-heading">
           <strong>${escapeHtml(chat.title || members.map((item) => item.name).join("、"))}</strong>
-          <span>${typing.length ? `${escapeHtml(typing.join("、"))} 正在输入…` : (chat.type === "group" ? `${members.length} 位角色` : "在线")}${chat.type === "single" && memoryCount ? ` · 记忆 ${memoryCount}` : ""}</span>
+          <span>${typing.length ? `${escapeHtml(typing.join("、"))} 正在输入…` : (chat.type === "group" ? `${members.length} 位角色` : "在线")}${summaryStatus ? ` · ${summaryStatus}` : ""}${chat.type === "single" && memoryCount ? ` · 记忆 ${memoryCount}` : ""}</span>
         </div>
         <button class="icon-btn" data-action="start-voice-call" title="语音通话">☎</button>
         <button class="icon-btn" data-action="start-video-call" title="视频通话">▣</button>
@@ -2435,26 +2450,26 @@ function tokensForCharacter(character) {
   return estimateTokens(buildCharacterCore(character));
 }
 
-function buildHistoryMessages(chat, targetCharacter, maxTokens, existingMessages = null) {
+function buildHistoryMessages(chat, targetCharacter, maxTokens, existingMessages = null, currentInput = "") {
   const source = existingMessages || state.currentMessages;
-  const visible = source.filter((message) => !message.regeneratedTo?.length || message.id === source[source.length - 1]?.id);
+  let visible = source.filter((message) => !message.regeneratedTo?.length || message.id === source[source.length - 1]?.id);
+  if (currentInput) {
+    const duplicateIndex = visible.findLastIndex((message) => message.role === "user" && message.text === currentInput);
+    if (duplicateIndex >= 0) visible = visible.filter((_, index) => index !== duplicateIndex);
+  }
+  // 只保留最近 15 条原文，更早内容统一通过 summary 注入。
+  visible = visible.slice(-15);
   const messages = [];
-  let tokens = estimateTokens(String(chat.summary || "")) + tokensForCharacter(targetCharacter);
-  for (let index = visible.length - 1; index >= 0; index -= 1) {
-    const message = visible[index];
+  for (const message of visible) {
     const historyText = messageToHistoryText(message);
     if (!historyText) continue;
-    const messageTokens = estimateTokens(historyText) + 4;
-    if (tokens + messageTokens > maxTokens) break;
     let content = historyText;
     if (chat.type === "group" && message.role === "char") {
       const sourceCharacter = getById(state.characters, message.charId);
       content = `${sourceCharacter?.name || "角色"}：${content}`;
     }
-    messages.unshift({ role: message.role === "user" ? "user" : "assistant", content });
-    tokens += messageTokens;
+    messages.push({ role: message.role === "user" ? "user" : "assistant", content });
   }
-  if (chat.summary) messages.unshift({ role: "system", content: `此前对话摘要：\n${chat.summary}` });
   return messages;
 }
 
@@ -2547,7 +2562,7 @@ async function buildPromptMessages(chat, character, currentInput = "", options =
   const memoryText = relevantMemories.length
     ? `[关于用户的长期记忆]\n${relevantMemories.map((memory) => `- ${memory.content}`).join("\n")}`
     : "";
-  const summary = chat.summary ? `此前对话摘要：\n${chat.summary}` : "";
+  const summary = chat.summary ? `[已压缩的旧对话摘要]\n${chat.summary}` : "";
   const userProfile = state.settings.userProfile?.description
     ? `用户设定：\n姓名：${state.settings.userProfile.name || "你"}\n${state.settings.userProfile.description}`
     : `用户姓名：${state.settings.userProfile?.name || "你"}`;
@@ -2571,7 +2586,7 @@ async function buildPromptMessages(chat, character, currentInput = "", options =
     "不要替用户决定行动，不要提及模型、提示词、系统规则或评分。",
     "保持长期关系连续性，允许情绪、停顿、误解和自然变化。"
   ].join("\n");
-  const dynamic = [summary, userProfile, core, memoryText, worldText, groupText, healthText, proactiveText, greetingText, interactionText, momentFeedback, chat.systemPromptExtra].filter(Boolean).join("\n\n");
+  const dynamic = [userProfile, core, memoryText, summary, worldText, groupText, healthText, proactiveText, greetingText, interactionText, momentFeedback, chat.systemPromptExtra].filter(Boolean).join("\n\n");
   let systemContent = "";
   if (preset?.prompts?.length) {
     const order = preset.prompt_order?.[0]?.order
@@ -2601,11 +2616,16 @@ async function buildPromptMessages(chat, character, currentInput = "", options =
   } else {
     systemContent = `${genericSystem}\n\n${dynamic}`;
   }
+  if (preset?.prompts?.length && systemContent) {
+    for (const part of [worldText, memoryText, summary, groupText, healthText, proactiveText, greetingText, interactionText, momentFeedback, chat.systemPromptExtra].filter(Boolean)) {
+      if (!systemContent.includes(part)) systemContent += `\n\n${part}`;
+    }
+  }
   if (character.postHistoryInstructions) systemContent += `\n\n历史后指令：\n${character.postHistoryInstructions}`;
   systemContent = applyRegexScripts(systemContent, 3, 0, { prompt: true });
   const maxContext = preset?.openai_max_context || 128000;
   const maxHistoryTokens = Math.max(1000, maxContext - estimateTokens(systemContent) - (preset?.openai_max_tokens || 4096));
-  const history = buildHistoryMessages(chat, character, maxHistoryTokens);
+  const history = buildHistoryMessages(chat, character, maxHistoryTokens, null, currentInput);
   const messages = [{ role: "system", content: systemContent.trim() }, ...history];
   if (currentInput) messages.push({ role: "user", content: currentInput });
   if (preset?.assistant_prefill) messages.push({ role: "assistant", content: preset.assistant_prefill });
@@ -2693,6 +2713,7 @@ async function sendUserMessage(text, type = "text", meta = {}) {
       if (character) await generateCharacterReply(chat, character, { userInput: type === "text" || type === "voice" ? value : "" });
     }
   }
+  queueRollingSummary(chat);
   queueMemoryExtraction(chat);
 }
 
@@ -2945,14 +2966,14 @@ async function maybeCreateGroupMilestone(chat, character, text) {
 /* ---------- 结构化长期记忆 ---------- */
 
 function queueMemoryExtraction(chat) {
-  const last = toNumber(chat.lastMemoryExtractAt, 0);
-  const visibleMessages = state.currentChat?.id === chat.id
-    ? state.currentMessages
-    : [];
-  const newMessageCount = last > 0
-    ? visibleMessages.filter((message) => message.time > last).length
-    : visibleMessages.length;
-  if (newMessageCount < 20) return;
+  if (state.currentChat?.id === chat.id) {
+    const last = toNumber(chat.lastMemoryExtractAt, 0);
+    const coveredMessages = state.currentMessages.slice(0, clamp(toNumber(chat.summaryCoversUpTo, 0), 0, state.currentMessages.length));
+    const newMessageCount = last > 0
+      ? coveredMessages.filter((message) => message.time > last).length
+      : coveredMessages.length;
+    if (newMessageCount < 20) return;
+  }
   setTimeout(() => {
     extractMemoriesForChat(chat).catch((error) => console.warn("长期记忆提取失败", error));
   }, 0);
@@ -2966,10 +2987,12 @@ async function extractMemoriesForChat(chat, options = {}) {
   }
   const allMessages = await dbGetByIndex("messages", "chatId", chat.id);
   allMessages.sort((a, b) => a.time - b.time);
+  const coveredCount = clamp(toNumber(chat.summaryCoversUpTo, 0), 0, allMessages.length);
+  const coveredMessages = allMessages.slice(0, coveredCount);
   const startAt = toNumber(chat.lastMemoryExtractAt, 0);
   let segment = startAt > 0
-    ? allMessages.filter((message) => message.time > startAt)
-    : allMessages.slice(toNumber(chat.summaryCoversUpTo, 0));
+    ? coveredMessages.filter((message) => message.time > startAt)
+    : coveredMessages;
   if (!options.force && segment.length < 20) return;
   if (!options.force && startAt > 0 && now() - startAt < 5 * 60_000) return;
   if (!segment.length) return;
@@ -2985,16 +3008,25 @@ async function extractMemoriesForChat(chat, options = {}) {
   if (!transcript.trim()) return;
 
   let extractedAny = false;
+  let memoryPromptTokens = 0;
+  let memoryCompletionTokens = 0;
   for (const character of characters) {
     try {
-      await extractMemoriesForCharacter(character, chat, segment, transcript, config);
+      const result = await extractMemoriesForCharacter(character, chat, segment, transcript, config);
       extractedAny = true;
+      memoryPromptTokens += toNumber(result.usage?.prompt_tokens, estimateTokens(transcript));
+      memoryCompletionTokens += toNumber(result.usage?.completion_tokens, estimateTokens(result.text || ""));
     } catch (error) {
       console.warn(`角色 ${character.name} 的记忆提取失败`, error);
     }
   }
   if (extractedAny) {
-    chat.lastMemoryExtractAt = allMessages.at(-1)?.time || now();
+    chat.lastMemoryExtractAt = segment.at(-1)?.time || now();
+    chat.contextStats = {
+      ...(chat.contextStats || {}),
+      memoryPromptTokens: toNumber(chat.contextStats?.memoryPromptTokens, 0) + memoryPromptTokens,
+      memoryCompletionTokens: toNumber(chat.contextStats?.memoryCompletionTokens, 0) + memoryCompletionTokens
+    };
     chat.updatedAt = now();
     await dbPut("chats", chat);
     if (state.currentChat?.id === chat.id) state.currentChat.lastMemoryExtractAt = chat.lastMemoryExtractAt;
@@ -3002,31 +3034,10 @@ async function extractMemoriesForChat(chat, options = {}) {
 }
 
 async function extractMemoriesForCharacter(character, chat, segment, transcript, config) {
-  const prompt = `你是记忆提取专家。从下面这段对话里，提取所有关于用户的重要信息，按 JSON 数组返回。
-
-每个条目包含：
-- type: "fact" | "relationship" | "promise" | "preference" | "event"
+  const prompt = `你是记忆提取专家。从以下对话中，提取关于用户的重要事实、偏好、承诺和关系变化。按 JSON 数组返回，每个条目包含：
+- type: "fact" | "preference" | "promise" | "relationship" | "event"
 - content: 一句简洁的中文描述（不超过 40 字）
-
-提取原则：
-1. 只提取关于用户的事实、偏好、承诺、关系变化、重要事件
-2. 不提取角色自己的事，除非和用户有关
-3. 不提取日常寒暄（"你好""吃了吗"）
-4. 不提取临时状态（"现在有点困"）
-5. 提取用户明确表达过的偏好、厌恶、习惯
-6. 提取双方约定过的事（承诺、计划）
-7. 提取关系变化（从陌生到熟悉、争执、和解）
-8. 同一件事只提取一次，不要重复
-
-只返回 JSON 数组，不要任何解释。如果这段对话没有值得提取的内容，返回空数组 []。
-
-示例输出：
-[
-  {"type": "preference", "content": "用户喜欢无糖可乐"},
-  {"type": "promise", "content": "约定周末去看海"},
-  {"type": "event", "content": "用户提到最近在加班"},
-  {"type": "relationship", "content": "两人第一次发生争执"}
-]
+只提取重要的、长期有效的信息。忽略日常寒暄和临时状态。只返回 JSON 数组。
 
 对话内容：
 ${transcript}`;
@@ -3035,7 +3046,7 @@ ${transcript}`;
     { role: "user", content: prompt }
   ], { sampling: { temperature: .3, max_tokens: 1400 } });
   const entries = parseMemoryExtractionResponse(result.text);
-  if (!entries.length) return;
+  if (!entries.length) return { text: result.text, usage: result.usage || {} };
   const existing = (await dbGetByIndex("memories", "characterId", character.id))
     .filter((memory) => memory.active);
   for (const memory of existing) {
@@ -3071,6 +3082,7 @@ ${transcript}`;
     existing.push(memory);
     await dbPut("memories", memory);
   }
+  return { text: result.text, usage: result.usage || {} };
 }
 
 function parseMemoryExtractionResponse(text) {
@@ -3248,6 +3260,8 @@ async function checkProactiveMessages() {
         text: generated.text.slice(0, 90), chatId: chat.id, messageId: generated.id
       });
       state.lastMessages.set(chat.id, generated);
+      queueRollingSummary(chat);
+      queueMemoryExtraction(chat);
       const lastMomentAt = character.stats?.lastMomentAt || 0;
       if (character.proactive.style !== "low"
         && now() - lastMomentAt > 12 * 3_600_000
@@ -5440,7 +5454,8 @@ function openSummaryManager() {
     title: "聊天摘要",
     body: `
       ${renderFormField("摘要", "summary", chat.summary || "", { type: "textarea", tall: true, full: true, hint: "摘要会作为系统上下文发送，原文不会重复进入 token 预算。" })}
-      <div class="field-hint">已覆盖到消息序号：${chat.summaryCoversUpTo || 0} / ${state.currentMessages.length}</div>
+      <div class="field-hint">已压缩旧消息：${Math.min(chat.summaryCoversUpTo || 0, state.currentMessages.length)} / ${state.currentMessages.length}，最近 15 条始终保留原文。</div>
+      <div class="field-hint">摘要累计 token：${chat.contextStats?.summaryPromptTokens || 0} prompt / ${chat.contextStats?.summaryCompletionTokens || 0} completion；记忆累计 token：${chat.contextStats?.memoryPromptTokens || 0} prompt / ${chat.contextStats?.memoryCompletionTokens || 0} completion。</div>
     `,
     actions: [
       { id: "cancel", label: "取消" },
@@ -5450,7 +5465,7 @@ function openSummaryManager() {
           const button = $('[data-modal-action="generate"]', $("#modal"));
           setBusy(button, true, "生成中");
           try {
-            await rebuildSummary();
+            await rebuildSummary(state.currentChat, null, { force: true });
             $('[name="summary"]', body).value = state.currentChat.summary;
             toast("摘要已更新");
           } catch (error) {
@@ -5466,7 +5481,7 @@ function openSummaryManager() {
         handler: async (body) => {
           state.currentChat.summary = $('[name="summary"]', body).value;
           state.currentChat.summaryUpdatedAt = now();
-          state.currentChat.summaryCoversUpTo = state.currentMessages.length;
+          state.currentChat.summaryCoversUpTo = Math.max(0, state.currentMessages.length - 15);
           await dbPut("chats", state.currentChat);
         }
       }
@@ -5474,37 +5489,85 @@ function openSummaryManager() {
   });
 }
 
-async function maybeAutoSummary() {
-  if (!state.settings.autoSummary || state.currentMessages.length < 40) return;
-  if (state.currentChat.summaryCoversUpTo >= state.currentMessages.length - 20) return;
-  try {
-    await rebuildSummary();
-  } catch (error) {
-    console.warn("自动摘要失败", error);
+function queueRollingSummary(chat) {
+  if (!state.settings.autoSummary) return;
+  if (state.currentChat?.id === chat.id) {
+    const covered = toNumber(chat.summaryCoversUpTo, 0);
+    const total = state.currentMessages.length;
+    const targetEnd = Math.max(0, total - 15);
+    if (total < 30 || targetEnd - covered < 20) return;
   }
+  setTimeout(() => {
+    maybeAutoSummary(chat).catch((error) => console.warn("滚动摘要失败", error));
+  }, 0);
 }
 
-async function rebuildSummary() {
-  const chat = state.currentChat;
+async function maybeAutoSummary(chat = state.currentChat) {
+  if (!state.settings.autoSummary || !chat) return;
+  const messages = state.currentChat?.id === chat.id
+    ? state.currentMessages
+    : await dbGetByIndex("messages", "chatId", chat.id);
+  messages.sort((a, b) => a.time - b.time);
+  const total = messages.length;
+  const end = Math.max(0, total - 15);
+  const covered = toNumber(chat.summaryCoversUpTo, 0);
+  if (total < 30 || end - covered < 20) return;
+  await rebuildSummary(chat, messages);
+}
+
+async function rebuildSummary(chat = state.currentChat, messages = null, options = {}) {
   if (!chat) return;
-  const config = getDefaultApi("text");
-  const end = Math.max(0, state.currentMessages.length - 12);
-  const source = state.currentMessages.slice(0, end).map((message) => {
+  const allMessages = messages || (state.currentChat?.id === chat.id
+    ? state.currentMessages
+    : await dbGetByIndex("messages", "chatId", chat.id));
+  allMessages.sort((a, b) => a.time - b.time);
+  const end = Math.max(0, allMessages.length - 15);
+  const covered = clamp(toNumber(chat.summaryCoversUpTo, 0), 0, allMessages.length);
+  if (end <= covered) return;
+  if (!options.force && end - covered < 20) return;
+  const sourceMessages = allMessages.slice(covered, end);
+  const source = sourceMessages.map((message) => {
     const character = message.charId ? getById(state.characters, message.charId) : null;
-    return `${message.role === "user" ? state.settings.userProfile?.name || "用户" : character?.name || "角色"}：${message.text}`;
-  }).join("\n");
-  if (!config || !source) {
-    chat.summary = state.currentMessages.slice(0, end).map(messagePreview).join("\n").slice(0, 1600);
+    return `${message.role === "user" ? state.settings.userProfile?.name || "用户" : character?.name || "角色"}：${messageToHistoryText(message)}`;
+  }).filter(Boolean).join("\n");
+  if (!source.trim()) return;
+
+  const config = getDefaultApi("text");
+  let summaryText = "";
+  if (!config) {
+    console.warn("滚动摘要跳过：未配置文字模型");
+    summaryText = [chat.summary, ...sourceMessages.map(messagePreview)].filter(Boolean).join("；").slice(-1600);
   } else {
     const result = await sendTextCompletion(config, [
-      { role: "system", content: "把对话压缩成长期记忆摘要。保留关系变化、承诺、未完成话题、重要偏好和事实，不写评价。使用简洁中文。" },
-      { role: "user", content: source }
-    ], { sampling: { temperature: 0.3, max_tokens: 900 } });
-    chat.summary = result.text.trim();
+      {
+        role: "system",
+        content: "你是一个对话摘要助手。请将以下对话记录压缩成一段简洁的摘要，保留关键事件、关系变化、重要承诺、用户的偏好和事实。摘要必须用第三人称，控制在 200 字以内。不要包含任何评价性语言。"
+      },
+      {
+        role: "user",
+        content: `${chat.summary ? `已有摘要：${chat.summary}\n` : ""}新增对话记录：\n${source}`
+      }
+    ], { sampling: { temperature: 0.2, max_tokens: 500 } });
+    summaryText = result.text.trim().slice(0, 600);
+    chat.contextStats = {
+      ...(chat.contextStats || {}),
+      summaryPromptTokens: toNumber(chat.contextStats?.summaryPromptTokens, 0) + toNumber(result.usage?.prompt_tokens, estimateTokens(source)),
+      summaryCompletionTokens: toNumber(chat.contextStats?.summaryCompletionTokens, 0) + toNumber(result.usage?.completion_tokens, estimateTokens(summaryText))
+    };
   }
+  chat.summary = summaryText;
   chat.summaryUpdatedAt = now();
   chat.summaryCoversUpTo = end;
+  chat.updatedAt = now();
   await dbPut("chats", chat);
+  if (state.currentChat?.id === chat.id) {
+    state.currentChat.summary = chat.summary;
+    state.currentChat.summaryUpdatedAt = chat.summaryUpdatedAt;
+    state.currentChat.summaryCoversUpTo = chat.summaryCoversUpTo;
+    state.currentChat.contextStats = chat.contextStats;
+  }
+  // 摘要覆盖范围扩大后，再从已摘要覆盖的旧消息中提取长期记忆。
+  queueMemoryExtraction(chat);
 }
 
 function openChatSearch() {
@@ -5673,7 +5736,6 @@ async function sendMessageFromComposer() {
   const text = input.value.trim();
   if (!text) return;
   await sendUserMessage(text);
-  await maybeAutoSummary();
 }
 
 function autoSizeTextarea(textarea) {
@@ -6490,6 +6552,10 @@ async function handleDocumentClick(event) {
       }
       setBusy(target, true, "提取中…");
       try {
+        const chatMessages = await dbGetByIndex("messages", "chatId", chat.id);
+        if (!toNumber(chat.summaryCoversUpTo, 0) && chatMessages.length > 15) {
+          await rebuildSummary(chat, chatMessages, { force: true });
+        }
         await extractMemoriesForChat(chat, { force: true, characterId: id });
         openCharacterForm(id);
         toast("记忆提取完成");
