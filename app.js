@@ -4,7 +4,7 @@
 
 const DB_NAME = "pocketlink";
 const DB_VERSION = 2;
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {
@@ -3185,29 +3185,41 @@ async function extractMemoriesForChat(chat, options = {}) {
 
   const targetIds = options.characterId ? [options.characterId] : [...chat.members];
   const characters = targetIds.map((id) => getById(state.characters, id)).filter(Boolean);
-  const transcript = segment.map((message) => {
-    const speaker = message.role === "user"
-      ? state.settings.userProfile?.name || "用户"
-      : getById(state.characters, message.charId)?.name || "角色";
-    return `${speaker}：${messageToHistoryText(message)}`;
-  }).filter(Boolean).join("\n");
-  if (!transcript.trim()) return;
+  /* 与摘要同理：整段历史一次性提交会超过上下文，必须分块。
+     逐块推进 lastMemoryExtractAt，失败的块下次重试。 */
+  const chunks = chunkMessagesByTokens(segment, Math.max(2000, toNumber(options.chunkTokens, 8000)), summaryLineFor);
+  if (!chunks.length) return;
 
   let extractedAny = false;
+  let lastExtractedTime = 0;
   let memoryPromptTokens = 0;
   let memoryCompletionTokens = 0;
-  for (const character of characters) {
-    try {
-      const result = await extractMemoriesForCharacter(character, chat, segment, transcript, config);
+  for (const chunk of chunks) {
+    const transcript = chunk.map(summaryLineFor).filter(Boolean).join("\n");
+    let chunkSucceeded = false;
+    if (transcript.trim()) {
+      for (const character of characters) {
+        try {
+          const result = await extractMemoriesForCharacter(character, chat, chunk, transcript, config);
+          chunkSucceeded = true;
+          memoryPromptTokens += toNumber(result.usage?.prompt_tokens, estimateTokens(transcript));
+          memoryCompletionTokens += toNumber(result.usage?.completion_tokens, estimateTokens(result.text || ""));
+        } catch (error) {
+          console.warn(`角色 ${character.name} 的记忆提取失败`, error);
+        }
+      }
+    } else {
+      chunkSucceeded = true;
+    }
+    if (chunkSucceeded) {
       extractedAny = true;
-      memoryPromptTokens += toNumber(result.usage?.prompt_tokens, estimateTokens(transcript));
-      memoryCompletionTokens += toNumber(result.usage?.completion_tokens, estimateTokens(result.text || ""));
-    } catch (error) {
-      console.warn(`角色 ${character.name} 的记忆提取失败`, error);
+      lastExtractedTime = chunk.at(-1)?.time || lastExtractedTime;
+    } else {
+      break;
     }
   }
   if (extractedAny) {
-    chat.lastMemoryExtractAt = segment.at(-1)?.time || now();
+    chat.lastMemoryExtractAt = lastExtractedTime || now();
     chat.contextStats = {
       ...(chat.contextStats || {}),
       memoryPromptTokens: toNumber(chat.contextStats?.memoryPromptTokens, 0) + memoryPromptTokens,
@@ -5736,11 +5748,15 @@ function openRenameChat() {
 function openSummaryManager() {
   const chat = state.currentChat;
   if (!chat) return;
+  const total = state.currentMessages.length;
+  const coveredCount = clamp(toNumber(chat.summaryCoversUpTo, 0), 0, total);
+  const pendingCount = Math.max(0, total - 15 - coveredCount);
   openModal({
     title: "聊天摘要",
     body: `
       ${renderFormField("摘要", "summary", chat.summary || "", { type: "textarea", tall: true, full: true, hint: "摘要会作为系统上下文发送，原文不会重复进入 token 预算。" })}
-      <div class="field-hint">已压缩旧消息：${Math.min(chat.summaryCoversUpTo || 0, state.currentMessages.length)} / ${state.currentMessages.length}，最近 15 条始终保留原文。</div>
+      <div class="field-hint">已压缩旧消息：${coveredCount} / ${total}${pendingCount ? `，还有 ${pendingCount} 条未压缩` : "，已全部压缩"}。最近 15 条始终保留原文。</div>
+      ${pendingCount ? `<div class="field-hint">超长历史会分批压缩，一次只处理一段，进度即时保存。点「AI 重建」继续推进，可以多点几次。</div>` : ""}
       <div class="field-hint">摘要累计 token：${chat.contextStats?.summaryPromptTokens || 0} prompt / ${chat.contextStats?.summaryCompletionTokens || 0} completion；记忆累计 token：${chat.contextStats?.memoryPromptTokens || 0} prompt / ${chat.contextStats?.memoryCompletionTokens || 0} completion。</div>
     `,
     actions: [
@@ -5751,9 +5767,12 @@ function openSummaryManager() {
           const button = $('[data-modal-action="generate"]', $("#modal"));
           setBusy(button, true, "生成中");
           try {
-            await rebuildSummary(state.currentChat, null, { force: true });
+            const result = await rebuildSummary(state.currentChat, null, { force: true, maxRounds: 12 });
             $('[name="summary"]', body).value = state.currentChat.summary;
-            toast("摘要已更新");
+            const left = Math.max(0, toNumber(result?.end, 0) - toNumber(result?.covered, 0));
+            toast(left
+              ? `已压缩到 ${result.covered} / ${result.end} 条，还有 ${left} 条，可再次点击继续`
+              : "摘要已更新");
           } catch (error) {
             toast(error.message, "error");
           } finally {
@@ -5773,6 +5792,37 @@ function openSummaryManager() {
       }
     ]
   });
+}
+
+/* ---------- 超长历史的分块处理 ----------
+   摘要与记忆提取都要把旧对话发给模型。存档动辄几十万字，
+   一次性提交必然超过上下文限制、请求直接失败，所以统一按 token 预算切块。 */
+
+function summaryLineFor(message) {
+  const body = messageToHistoryText(message);
+  if (!body) return "";
+  const speaker = message.role === "user"
+    ? state.settings.userProfile?.name || "用户"
+    : getById(state.characters, message.charId)?.name || "角色";
+  return `${speaker}：${body}`;
+}
+
+function chunkMessagesByTokens(messages, budgetTokens, toText) {
+  const chunks = [];
+  let current = [];
+  let used = 0;
+  for (const message of messages) {
+    const cost = estimateTokens(toText(message)) + 1;
+    if (current.length && used + cost > budgetTokens) {
+      chunks.push(current);
+      current = [];
+      used = 0;
+    }
+    current.push(message);
+    used += cost;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
 }
 
 function queueRollingSummary(chat) {
@@ -5808,52 +5858,68 @@ async function rebuildSummary(chat = state.currentChat, messages = null, options
     : await dbGetByIndex("messages", "chatId", chat.id));
   allMessages.sort((a, b) => a.time - b.time);
   const end = Math.max(0, allMessages.length - 15);
-  const covered = clamp(toNumber(chat.summaryCoversUpTo, 0), 0, allMessages.length);
-  if (end <= covered) return;
-  if (!options.force && end - covered < 20) return;
-  const sourceMessages = allMessages.slice(covered, end);
-  const source = sourceMessages.map((message) => {
-    const character = message.charId ? getById(state.characters, message.charId) : null;
-    return `${message.role === "user" ? state.settings.userProfile?.name || "用户" : character?.name || "角色"}：${messageToHistoryText(message)}`;
-  }).filter(Boolean).join("\n");
-  if (!source.trim()) return;
+  const startCovered = clamp(toNumber(chat.summaryCoversUpTo, 0), 0, allMessages.length);
+  if (end <= startCovered) return { covered: startCovered, end, done: true };
+  if (!options.force && end - startCovered < 20) return { covered: startCovered, end, done: false };
 
   const config = getDefaultApi("text");
-  let summaryText = "";
-  if (!config) {
-    console.warn("滚动摘要跳过：未配置文字模型");
-    summaryText = [chat.summary, ...sourceMessages.map(messagePreview)].filter(Boolean).join("；").slice(-1600);
-  } else {
-    const result = await sendTextCompletion(config, [
-      {
-        role: "system",
-        content: "你是一个对话摘要助手。请将以下对话记录压缩成一段简洁的摘要，保留关键事件、关系变化、重要承诺、用户的偏好和事实。摘要必须用第三人称，控制在 200 字以内。不要包含任何评价性语言。"
-      },
-      {
-        role: "user",
-        content: `${chat.summary ? `已有摘要：${chat.summary}\n` : ""}新增对话记录：\n${source}`
+  const pending = allMessages.slice(startCovered, end);
+  /* 分块压缩：一次请求只带一小段，摘要接力往下传。
+     旧实现把 startCovered 到 end 的全部消息一次性提交，几十万字的存档
+     必然触发上下文超限；调用方的 .catch(console.warn) 又把错误静默吞掉，
+     于是 summaryCoversUpTo 永远停在 0，旧对话既没被摘要、也不会被发送。 */
+  const chunkTokens = Math.max(2000, toNumber(options.chunkTokens, 12000));
+  const maxRounds = Math.max(1, toNumber(options.maxRounds, options.force ? 20 : 2));
+  const chunks = chunkMessagesByTokens(pending, chunkTokens, summaryLineFor);
+  let covered = startCovered;
+  let summaryText = chat.summary || "";
+  let rounds = 0;
+
+  for (const chunk of chunks) {
+    if (rounds >= maxRounds) break;
+    const source = chunk.map(summaryLineFor).filter(Boolean).join("\n");
+    if (source.trim()) {
+      rounds += 1;
+      if (!config) {
+        console.warn("滚动摘要跳过：未配置文字模型");
+        summaryText = [summaryText, ...chunk.map(messagePreview)].filter(Boolean).join("；").slice(-1600);
+      } else {
+        const result = await sendTextCompletion(config, [
+          {
+            role: "system",
+            content: "你是一个对话摘要助手。请将以下对话记录压缩成一段简洁的摘要，保留关键事件、关系变化、重要承诺、用户的偏好和事实。摘要必须用第三人称，控制在 200 字以内。不要包含任何评价性语言。"
+          },
+          {
+            role: "user",
+            content: `${summaryText ? `已有摘要：${summaryText}\n` : ""}新增对话记录：\n${source}`
+          }
+        ], { sampling: { temperature: 0.2, max_tokens: 500 } });
+        summaryText = result.text.trim().slice(0, 600);
+        chat.contextStats = {
+          ...(chat.contextStats || {}),
+          summaryPromptTokens: toNumber(chat.contextStats?.summaryPromptTokens, 0) + toNumber(result.usage?.prompt_tokens, estimateTokens(source)),
+          summaryCompletionTokens: toNumber(chat.contextStats?.summaryCompletionTokens, 0) + toNumber(result.usage?.completion_tokens, estimateTokens(summaryText))
+        };
       }
-    ], { sampling: { temperature: 0.2, max_tokens: 500 } });
-    summaryText = result.text.trim().slice(0, 600);
-    chat.contextStats = {
-      ...(chat.contextStats || {}),
-      summaryPromptTokens: toNumber(chat.contextStats?.summaryPromptTokens, 0) + toNumber(result.usage?.prompt_tokens, estimateTokens(source)),
-      summaryCompletionTokens: toNumber(chat.contextStats?.summaryCompletionTokens, 0) + toNumber(result.usage?.completion_tokens, estimateTokens(summaryText))
-    };
+    }
+    covered += chunk.length;
+    // 每完成一块就落库：中途失败也不会丢掉已经推进的进度。
+    chat.summary = summaryText;
+    chat.summaryUpdatedAt = now();
+    chat.summaryCoversUpTo = covered;
+    chat.updatedAt = now();
+    await dbPut("chats", chat);
   }
-  chat.summary = summaryText;
-  chat.summaryUpdatedAt = now();
-  chat.summaryCoversUpTo = end;
-  chat.updatedAt = now();
-  await dbPut("chats", chat);
-  if (state.currentChat?.id === chat.id) {
+
+  if (covered > startCovered && state.currentChat?.id === chat.id) {
     state.currentChat.summary = chat.summary;
     state.currentChat.summaryUpdatedAt = chat.summaryUpdatedAt;
     state.currentChat.summaryCoversUpTo = chat.summaryCoversUpTo;
     state.currentChat.contextStats = chat.contextStats;
   }
   // 摘要覆盖范围扩大后，再从已摘要覆盖的旧消息中提取长期记忆。
-  queueMemoryExtraction(chat);
+  if (covered > startCovered) queueMemoryExtraction(chat);
+  return { covered, end, done: covered >= end };
 }
 
 function openChatSearch() {
