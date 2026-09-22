@@ -4,7 +4,7 @@
 
 const DB_NAME = "pocketlink";
 const DB_VERSION = 2;
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {
@@ -642,6 +642,14 @@ function renderAvatar(character, extra = "") {
 function renderChatAvatar(chat) {
   const members = chat.members.map((id) => getById(state.characters, id)).filter(Boolean);
   if (chat.type === "group") {
+    const tint = escapeAttr(members[0]?.color || hashColor(chat.title));
+    /* 群头像优先使用用户从相册导入的图片 / 短视频，没有才回退到成员首字 */
+    if (chat.avatarType === "video" && chat.avatar) {
+      return `<span class="chat-avatar has-video" style="background:${tint}"><video src="${escapeAttr(chat.avatar)}" ${chat.avatarPoster ? `poster="${escapeAttr(chat.avatarPoster)}"` : ""} autoplay muted loop playsinline></video></span>`;
+    }
+    if (chat.avatarType === "image" && chat.avatar) {
+      return `<span class="chat-avatar" style="background-image:url('${escapeAttr(chat.avatar)}');background-color:${tint}"></span>`;
+    }
     /* 群头像只取前两位成员的首个字符。此前用 initials() 会取出两个汉字，
        再和另一个成员的 emoji 拼在一起，三个字符在 46px 的圆里必然溢出。 */
     const marks = members.slice(0, 2).map((item) => {
@@ -651,7 +659,7 @@ function renderChatAvatar(chat) {
       return [...String(source || "?")][0] || "?";
     }).join("");
     const sizeClass = [...marks].length > 1 ? " stack-two" : "";
-    return `<span class="chat-avatar${sizeClass}" style="background:${escapeAttr(members[0]?.color || hashColor(chat.title))};color:#fff">${escapeHtml(marks)}</span>`;
+    return `<span class="chat-avatar${sizeClass}" style="background:${tint};color:#fff">${escapeHtml(marks)}</span>`;
   }
   const character = members[0];
   if (character?.avatarType === "video" && character.avatar) {
@@ -913,6 +921,8 @@ function defaultChat(type, members, title = "") {
   return {
     id: uid(), createdAt: stamp, updatedAt: stamp, lastActiveAt: stamp,
     type, members, title, unread: 0, pinned: false, muted: false,
+    /* 群聊可以单独换头像（相册导入）；单聊沿用成员角色自己的头像 */
+    avatar: "", avatarType: "emoji", avatarPoster: "",
     archived: false, draft: "", messages: [], summary: "", lastMemoryExtractAt: 0,
     summaryUpdatedAt: 0, summaryCoversUpTo: 0, memory: [],
     contextStats: {
@@ -2010,10 +2020,47 @@ function isCharacterCard(data) {
     || (data.first_mes !== undefined && data.name !== undefined);
 }
 
+/* 群聊头像：支持相册里的静态图片或短视频。
+   视频沿用角色动态头像的 20 MB 上限，避免把 IndexedDB 撑爆。 */
+async function setGroupAvatarFromFile(file) {
+  const chat = state.currentChat;
+  assert(chat && chat.type === "group", "请先进入一个群聊");
+  if (file.type.startsWith("video/")) {
+    if (file.size > 20 * 1024 * 1024) throw new Error("群头像视频超过 20 MB 限制");
+    chat.avatar = await fileToDataUrl(file);
+    chat.avatarType = "video";
+    chat.avatarPoster = "";
+  } else {
+    chat.avatar = await imageFileToDataUrl(file, 720, .88);
+    chat.avatarType = "image";
+    chat.avatarPoster = "";
+  }
+  chat.updatedAt = now();
+  await dbPut("chats", chat);
+  renderScreen();
+  toast("群头像已更新");
+}
+
+async function clearGroupAvatar() {
+  const chat = state.currentChat;
+  assert(chat && chat.type === "group", "请先进入一个群聊");
+  chat.avatar = "";
+  chat.avatarType = "emoji";
+  chat.avatarPoster = "";
+  chat.updatedAt = now();
+  await dbPut("chats", chat);
+  renderScreen();
+  toast("已恢复成员首字头像");
+}
+
 async function importFile(file, kind = "auto") {
   const extension = file.name.split(".").pop().toLowerCase();
   if (kind === "chat-image" || kind === "chat-video") {
     await sendChatMediaFile(file, kind === "chat-image" ? "image" : "video");
+    return;
+  }
+  if (kind === "group-avatar") {
+    await setGroupAvatarFromFile(file);
     return;
   }
   if (kind === "character-png" || ((kind === "auto" || kind === "character") && (extension === "png" || file.type === "image/png"))) {
@@ -3692,7 +3739,9 @@ function renderProfilePage() {
       </div>`;
   } else if (state.profileTab === "appearance") {
     content = `
-      <div class="section-heading"><div><strong>主题外观</strong><span>选择主题并打开完整外观设置</span></div><button class="btn small" data-action="open-settings">详细设置</button></div>
+      <div class="section-heading"><div><strong>字体大小</strong><span>全站文字同步缩放</span></div><button class="btn small" data-action="open-settings">更多外观设置</button></div>
+      <div class="surface">${renderFontScaleControl({ hideLabel: true })}</div>
+      <div class="section-heading"><div><strong>主题</strong><span>选择一套配色与质感</span></div></div>
       <div class="theme-card-grid">${state.themes.map(renderThemeCard).join("")}</div>`;
   } else {
     content = `
@@ -4033,6 +4082,81 @@ function confirmDialog(title, text, confirmLabel = "确认") {
       ]
     });
   });
+}
+
+/* ---------- 全局字体大小 ----------
+   一次调节，全站文字同步缩放：
+   styles.css 里所有 font-size 都写成 calc(Npx * var(--font-scale, 1))，
+   这里只负责改这一支变量，底部导航、设置页、聊天气泡会一起变化。
+   图标尺寸用的是 width/height，不跟着放大，避免图标挤掉文字。 */
+
+const FONT_SCALE_MIN = .8;
+const FONT_SCALE_MAX = 1.5;
+
+/* 预设档位：小 / 标准 / 大 / 更大 / 特大 */
+const FONT_SCALE_LEVELS = [
+  [0.9, "小"],
+  [1, "标准"],
+  [1.1, "大"],
+  [1.25, "更大"],
+  [1.4, "特大"]
+];
+
+function normalizeFontScale(value) {
+  const num = toNumber(value, 1);
+  return clamp(Math.round(num * 100) / 100, FONT_SCALE_MIN, FONT_SCALE_MAX);
+}
+
+function renderFontScaleControl(options = {}) {
+  const value = normalizeFontScale(state.settings.fontScale);
+  return `
+    <div class="field full font-scale-field">
+      ${options.hideLabel ? "" : "<label>字体大小</label>"}
+      <div class="font-scale-panel" data-font-scale>
+        <div class="font-scale-row">
+          <button type="button" class="font-step" data-action="font-scale-step" data-delta="-0.05"
+                  title="缩小一档" aria-label="缩小字体">A<i>−</i></button>
+          <input class="font-slider" type="range" name="fontScale"
+                 min="${FONT_SCALE_MIN}" max="${FONT_SCALE_MAX}" step="0.05"
+                 value="${value}" data-action="font-scale-range"
+                 aria-label="字体大小">
+          <button type="button" class="font-step large" data-action="font-scale-step" data-delta="0.05"
+                  title="放大一档" aria-label="放大字体">A<i>+</i></button>
+        </div>
+        <div class="font-scale-presets">
+          ${FONT_SCALE_LEVELS.map(([level, label]) => `
+            <button type="button" data-action="font-scale-set" data-value="${level}"
+                    class="${Math.abs(level - value) < .001 ? "active" : ""}">${label}</button>`).join("")}
+        </div>
+        <div class="font-scale-preview">
+          <strong>聊天气泡、底部导航、设置页</strong>
+          <span>所有界面文字一起缩放，图标尺寸保持不变。</span>
+          <span data-font-scale-note>当前 ${Math.round(value * 100)}%。</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* 只刷新控件显示，不动数据 */
+function syncFontScaleUI() {
+  const value = normalizeFontScale(state.settings.fontScale);
+  $$("[data-font-scale]").forEach((root) => {
+    const range = $('[data-action="font-scale-range"]', root);
+    if (range) range.value = String(value);
+    const note = $("[data-font-scale-note]", root);
+    if (note) note.textContent = `当前 ${Math.round(value * 100)}%。`;
+    $$('[data-action="font-scale-set"]', root).forEach((button) => {
+      button.classList.toggle("active", Math.abs(Number(button.dataset.value) - value) < .001);
+    });
+  });
+}
+
+/* persist=false 用于拖动滑杆时的实时预览，松手后再落库 */
+async function setFontScale(value, options = {}) {
+  state.settings.fontScale = normalizeFontScale(value);
+  document.documentElement.style.setProperty("--font-scale", String(state.settings.fontScale));
+  syncFontScaleUI();
+  if (options.persist !== false) await saveSettings();
 }
 
 function renderFormField(label, name, value = "", options = {}) {
@@ -4972,7 +5096,7 @@ function openSettings() {
       <div class="surface">
         <div class="surface-title"><strong>外观</strong><span>主题可在左侧快速切换</span></div>
         <div class="form-grid">
-          ${renderFormField("字体缩放", "fontScale", settings.fontScale, { type: "number", step: "0.05", min: "0.8", max: "1.5" })}
+          ${renderFontScaleControl()}
           ${renderFormField("气泡圆角（留空跟随主题）", "bubbleRadius", settings.bubbleRadius ?? "", { type: "number" })}
           ${renderFormField("日夜主题", "themeMode", settings.themeMode || "system", { type: "select", options: [["system", "跟随系统"], ["day", "日间版"], ["night", "夜间版"]] })}
           <div class="field full check-row"><span>跟随系统浅色 / 深色</span><span class="switch"><input type="checkbox" name="followSystem" ${settings.followSystem ? "checked" : ""}><i></i></span></div>
@@ -5028,7 +5152,7 @@ function openSettings() {
         handler: async (body) => {
           const data = readForm($("form", body));
           Object.assign(settings, {
-            fontScale: clamp(toNumber(data.fontScale, 1), .8, 1.5),
+            fontScale: normalizeFontScale(data.fontScale),
             bubbleRadius: data.bubbleRadius === "" ? null : toNumber(data.bubbleRadius, 0),
             themeMode: data.themeMode || "system",
             followSystem: Boolean(data.followSystem),
@@ -5548,6 +5672,16 @@ function openChatMenu() {
     { icon: icon("question"), title: "互动问答", subtitle: "真心话、五五开、记忆考验", action: "open-interactions" },
     { icon: icon("moon"), title: "哄睡模式", subtitle: "白噪音与角色轻声朗读", action: "open-sleep-mode" },
     { icon: icon("search"), title: "搜索消息", subtitle: "在本地聊天记录中查找", action: "search-chat" },
+    /* 群聊可以单独换头像：相册导入静态图片或短视频，单聊沿用角色头像 */
+    ...(chat.type === "group" ? [
+      {
+        icon: icon("pngPhoto"),
+        title: "从相册设置群头像",
+        subtitle: chat.avatar ? "已自定义，可重新选择" : "当前使用成员首字",
+        action: "set-group-avatar"
+      },
+      ...(chat.avatar ? [{ icon: icon("close"), title: "移除群头像", subtitle: "恢复成员首字", danger: true, action: "clear-group-avatar" }] : [])
+    ] : []),
     { icon: icon("edit"), title: "编辑聊天标题", subtitle: chat.title, action: "rename-chat" },
     { icon: icon("pin"), title: chat.pinned ? "取消置顶" : "置顶聊天", subtitle: "调整首页排序", action: "toggle-pin-chat" },
     { icon: icon(chat.muted ? "volumeOff" : "volumeOn"), title: chat.muted ? "取消静音" : "静音聊天", subtitle: "停止未读提示", action: "toggle-mute-chat" },
@@ -6595,6 +6729,20 @@ async function handleDocumentClick(event) {
       if (list) list.innerHTML += `<div class="prompt-item" data-schedule data-id="${uid()}"><span class="drag-handle">${icon("drag")}</span><div><div class="form-grid"><div class="field"><label>名称</label><input name="scheduleTitle"></div><div class="field"><label>时间</label><input type="datetime-local" name="scheduleTime"></div><div class="field full"><label>备注</label><input name="scheduleNote"></div></div></div><button type="button" class="icon-btn danger" data-action="remove-schedule">${icon("close")}</button></div>`;
     }
     else if (action === "remove-schedule") target.closest("[data-schedule]")?.remove();
+    else if (action === "font-scale-step") {
+      await setFontScale(toNumber(state.settings.fontScale, 1) + toNumber(target.dataset.delta, 0));
+    }
+    else if (action === "font-scale-set") {
+      await setFontScale(target.dataset.value);
+    }
+    else if (action === "set-group-avatar") {
+      closeSheet();
+      pickFile("group-avatar", "image/*,video/*");
+    }
+    else if (action === "clear-group-avatar") {
+      closeSheet();
+      await clearGroupAvatar();
+    }
     else if (action === "open-notification-chat") {
       const chat = state.chats.find((item) => item.id === target.dataset.chatId);
       if (chat) {
@@ -6969,6 +7117,10 @@ async function handleDocumentClick(event) {
 
 function handleDocumentInput(event) {
   if (event.target.matches("[data-input=chat]")) autoSizeTextarea(event.target);
+  /* 拖动滑杆时只做实时预览，松手（change）再写库，避免频繁写 IndexedDB */
+  if (event.target.matches('[data-action="font-scale-range"]')) {
+    setFontScale(event.target.value, { persist: false });
+  }
   if (event.target.name?.startsWith("dim_")) {
     const output = event.target.closest(".personality-row")?.querySelector("output");
     if (output) output.textContent = event.target.value;
@@ -6977,6 +7129,9 @@ function handleDocumentInput(event) {
 
 async function handleDocumentChange(event) {
   const target = event.target;
+  if (target.matches('[data-action="font-scale-range"]')) {
+    await setFontScale(target.value);
+  }
   if (target.name === "avatarFile" && target.files?.[0]) {
     const file = target.files[0];
     const preview = $("#avatarPreview");
