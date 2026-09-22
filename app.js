@@ -4,7 +4,7 @@
 
 const DB_NAME = "pocketlink";
 const DB_VERSION = 2;
-const APP_VERSION = 8;
+const APP_VERSION = 10;
 const THEME_KEY = "pocketlink_theme";
 
 const STORE_DEFS = {
@@ -383,6 +383,117 @@ const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.strin
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const isObject = (value) => value && typeof value === "object" && !Array.isArray(value);
 
+/* ---------- 图标系统 ----------
+   统一的内联 SVG 图标库。所有图标：
+   - 24×24 viewBox，stroke 跟随 currentColor，因此自动适配任何主题色；
+   - fill:none + stroke-linecap:round，线面统一，小尺寸下依然清晰；
+   - 通过 icon("name", size) 输出，默认 1em 大小，可直接嵌在任意文本流里。
+   替换掉此前的几何符号（◫ ◎ ◇ ♡ ⚙ 等）与 emoji。 */
+
+const ICON_PATHS = {
+  /* 主导航 */
+  messages: `<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.9-.9L4 20.5l1.7-4.2A8 8 0 0 1 4.5 11.5 8.4 8.4 0 0 1 13 3.2a8.4 8.4 0 0 1 8 8.3Z"/><path d="M8.8 11.5h.01M12.5 11.5h.01M16.2 11.5h.01"/>`,
+  groups: `<circle cx="9" cy="8" r="3.2"/><path d="M3.2 20a6 6 0 0 1 11.6 0"/><path d="M16.4 5.6a3 3 0 0 1 0 5.6"/><path d="M18.4 19.6a5.6 5.6 0 0 0-2.2-4.4"/>`,
+  dates: `<path d="M12 20.5s-7-4.4-7-9.4a4.1 4.1 0 0 1 7-2.9 4.1 4.1 0 0 1 7 2.9c0 5-7 9.4-7 9.4Z"/>`,
+  health: `<path d="M3.5 12.4h3.2l1.9-4.6 3 9.2 2-5.3 1.5 2.4h5.4"/><path d="M4.6 5.4a4 4 0 0 1 6.8 1.7 4 4 0 0 1 6.8-1.7c1.9 1.9 1.9 5 0 6.9"/>`,
+  profile: `<circle cx="12" cy="12" r="3.1"/><path d="M12 2.8v2.4M12 18.8v2.4M4.2 12H1.8M22.2 12h-2.4M6.6 6.6 4.9 4.9M19.1 19.1l-1.7-1.7M6.6 17.4l-1.7 1.7M19.1 4.9l-1.7 1.7"/>`,
+
+  /* 空状态 */
+  character: `<circle cx="12" cy="8.4" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>`,
+  book: `<path d="M4 4.6h6.2a2.4 2.4 0 0 1 2.4 2.4v12a1.8 1.8 0 0 0-1.8-1.8H4Z"/><path d="M20 4.6h-6.2A2.4 2.4 0 0 0 11.4 7v12a1.8 1.8 0 0 1 1.8-1.8H20Z"/>`,
+  preset: `<path d="M4 6.4h16M4 12h16M4 17.6h16"/><circle cx="9" cy="6.4" r="1.9" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.9" fill="currentColor" stroke="none"/><circle cx="8" cy="17.6" r="1.9" fill="currentColor" stroke="none"/>`,
+  regex: `<path d="M8.5 8.5v7M5.6 10l5.8 4M11.4 10l-5.8 4"/><circle cx="17.4" cy="15.4" r="1.6" fill="currentColor" stroke="none"/>`,
+  quick: `<path d="M13.6 2.6 5.4 13.2h5.2l-1.2 8.2 8.2-10.6h-5.2Z"/>`,
+  memory: `<path d="M12 3.2 14.3 8 19.6 8.6 15.7 12.2 16.7 17.4 12 14.8 7.3 17.4 8.3 12.2 4.4 8.6 9.7 8Z"/>`,
+  moment: `<circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v2.2M12 18.2v2.2M3.6 12h2.2M18.2 12h2.2"/><circle cx="12" cy="12" r="2.6"/>`,
+  notification: `<path d="M6.4 9.6a5.6 5.6 0 0 1 11.2 0c0 4.4 1.6 5.8 1.6 5.8H4.8s1.6-1.4 1.6-5.8Z"/><path d="M10.2 19.2a2.1 2.1 0 0 0 3.6 0"/>`,
+  api: `<path d="M4.6 8.4h13.2M14.4 5.2l3.2 3.2-3.2 3.2"/><path d="M19.4 15.6H6.2M9.6 12.4 6.4 15.6l3.2 3.2"/>`,
+  settings: `<circle cx="12" cy="12" r="3.1"/><path d="M19.3 14.4a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7h-.2a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1v-.2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.8 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/>`,
+  palette: `<path d="M12 3.2a8.8 8.8 0 0 0 0 17.6c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8h1.6a4.4 4.4 0 0 0 4.4-4.4c0-4-3.8-7.2-8.8-7.2Z"/><circle cx="7.8" cy="11" r="1.15" fill="currentColor" stroke="none"/><circle cx="10.6" cy="7.4" r="1.15" fill="currentColor" stroke="none"/><circle cx="14.8" cy="7.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="17.2" cy="11.2" r="1.15" fill="currentColor" stroke="none"/>`,
+  wallet: `<path d="M4 7.6A2.4 2.4 0 0 1 6.4 5.2h11.2A2.4 2.4 0 0 1 20 7.6v9.2a2.4 2.4 0 0 1-2.4 2.4H6.4A2.4 2.4 0 0 1 4 16.8Z"/><path d="M4 9.4h16"/><circle cx="16.2" cy="14.4" r="1.2" fill="currentColor" stroke="none"/>`,
+  schedule: `<rect x="4" y="5.4" width="16" height="14.8" rx="2.4"/><path d="M8 3.2v4M16 3.2v4M4 10.2h16"/>`,
+  upload: `<path d="M12 16V4.4M7.8 8.6 12 4.4l4.2 4.2"/><path d="M4.6 15.6v2.4a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.4"/>`,
+  download: `<path d="M12 4.4V16M7.8 11.8 12 16l4.2-4.2"/><path d="M4.6 15.6v2.4a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.4"/>`,
+  restore: `<path d="M4.4 12a7.6 7.6 0 1 0 2.4-5.5"/><path d="M4.4 4.6v4h4"/>`,
+  lock: `<rect x="5.2" y="10.4" width="13.6" height="9.4" rx="2.2"/><path d="M8.4 10.4V7.8a3.6 3.6 0 0 1 7.2 0v2.6"/>`,
+  spark: `<path d="M12 3.4 13.6 9 19.2 10.6 13.6 12.2 12 17.8 10.4 12.2 4.8 10.6 10.4 9Z"/><path d="M18.4 15.6 19.2 18l2.4.8-2.4.8-.8 2.4-.8-2.4-2.4-.8 2.4-.8Z"/>`,
+  image: `<rect x="4" y="5.4" width="16" height="13.4" rx="2.4"/><circle cx="9" cy="10.4" r="1.6"/><path d="M4.6 16.4 9.4 12l3 2.6 2.8-2.4 4.2 4.2"/>`,
+  video: `<rect x="3.4" y="6" width="12.4" height="12" rx="2.4"/><path d="M15.8 10.6 20.6 7.8v8.4l-4.8-2.8Z"/>`,
+  text: `<path d="M5.4 6.4h13.2M12 6.4v11.2M9 17.6h6"/>`,
+  mic: `<rect x="9.2" y="3.4" width="5.6" height="10" rx="2.8"/><path d="M5.8 11.4a6.2 6.2 0 0 0 12.4 0M12 17.6v3"/>`,
+  plus: `<path d="M12 5.2v13.6M5.2 12h13.6"/>`,
+  close: `<path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8"/>`,
+  chevron: `<path d="M9.4 5.6 15.8 12l-6.4 6.4"/>`,
+  menu: `<path d="M5 7.4h14M5 12h14M5 16.6h14"/>`,
+  more: `<circle cx="6" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.6" fill="currentColor" stroke="none"/>`,
+  search: `<circle cx="10.8" cy="10.8" r="6"/><path d="M15.2 15.2 20 20"/>`,
+  alert: `<path d="M12 4.4 21 19.6H3Z"/><path d="M12 10v3.6M12 16.6h.01"/>`,
+  reply: `<path d="M9.2 5.6 3.6 11l5.6 5.4"/><path d="M3.6 11h8.6a7 7 0 0 1 7 7v.6"/>`,
+  copy: `<rect x="8.6" y="8.6" width="11.4" height="11.4" rx="2.2"/><path d="M15.4 5.4A2 2 0 0 0 13.4 3.4H5.8a2.4 2.4 0 0 0-2.4 2.4v7.6a2 2 0 0 0 2 2"/>`,
+  edit: `<path d="M16.8 4.4 19.6 7.2 8.4 18.4l-3.8.8.8-3.8Z"/><path d="M14.6 6.6l2.8 2.8"/>`,
+  regenerate: `<path d="M20 12a8 8 0 1 1-2.7-6"/><path d="M20 4v4.6h-4.6"/>`,
+  trash: `<path d="M4.6 6.8h14.8"/><path d="M9.4 6.8V5.2a1.6 1.6 0 0 1 1.6-1.6h2a1.6 1.6 0 0 1 1.6 1.6v1.6"/><path d="M6.6 6.8l.8 12a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8l.8-12"/>`,
+  chatNew: `<path d="M20.4 12.6a7.6 7.6 0 0 1-8.2 7.6 8.4 8.4 0 0 1-3.4-.8L4.6 20.6l1.4-4a7.6 7.6 0 0 1-.8-3.4 7.6 7.6 0 0 1 7.6-7.6"/><path d="M17.6 3.2v5.6M20.4 6h-5.6"/>`,
+  importJson: `<path d="M12 3.6v9.8M8.2 9.6 12 13.4l3.8-3.8"/><path d="M4.6 15.4v2.2a2.4 2.4 0 0 0 2.4 2.4h10a2.4 2.4 0 0 0 2.4-2.4v-2.2"/>`,
+  pngPhoto: `<rect x="4" y="5.4" width="16" height="13.4" rx="2.4"/><circle cx="9" cy="10.4" r="1.6"/><path d="M4.6 16.4 9.4 12l3 2.6 2.8-2.4 4.2 4.2"/>`,
+  textPaste: `<path d="M8.6 4.6H6.4A1.8 1.8 0 0 0 4.6 6.4v13.2a1.8 1.8 0 0 0 1.8 1.8h11.2a1.8 1.8 0 0 0 1.8-1.8V6.4a1.8 1.8 0 0 0-1.8-1.8h-2.2"/><rect x="8.6" y="2.6" width="6.8" height="4" rx="1.4"/><path d="M8.4 12.4h7.2M8.4 16h4.6"/>`,
+  phoneCall: `<path d="M8.4 4.2 6.2 4.2A2 2 0 0 0 4.2 6.4c0 7.4 6 13.4 13.4 13.4a2 2 0 0 0 2.2-2v-2.2l-3.8-1.6-1.8 2a11.4 11.4 0 0 1-4.4-4.4l2-1.8Z"/>`,
+  videoCall: `<rect x="2.8" y="6.6" width="12.6" height="10.8" rx="2.4"/><path d="M15.4 11.4 21.2 8v8l-5.8-3.4Z"/>`,
+  transferMoney: `<circle cx="12" cy="12" r="8.4"/><path d="M9.2 8.8h5.6M9.2 12h5.6M12 8.8v6.4M14.4 15.2 12 17.6l-2.4-2.4"/>`,
+  location: `<path d="M12 20.8c4.2-4.4 6.6-7.4 6.6-10.2a6.6 6.6 0 1 0-13.2 0c0 2.8 2.4 5.8 6.6 10.2Z"/><circle cx="12" cy="10.4" r="2.4"/>`,
+  moon: `<path d="M20 13.6A8.4 8.4 0 1 1 10.4 4a6.8 6.8 0 0 0 9.6 9.6Z"/>`,
+  summary: `<path d="M6 4.6h12a1.6 1.6 0 0 1 1.6 1.6v11.6a1.6 1.6 0 0 1-1.6 1.6H6a1.6 1.6 0 0 1-1.6-1.6V6.2A1.6 1.6 0 0 1 6 4.6Z"/><path d="M8 9.4h8M8 12.6h8M8 15.8h4.6"/>`,
+  pin: `<path d="M9.6 3.6h4.8l-.8 6 3.2 3.2H14l-.6 7.6-2.8-3.4-2.8 3.4L7.2 12.8H4.8l3.2-3.2Z"/>`,
+  emoji: `<circle cx="12" cy="12" r="8.4"/><path d="M9 10.2h.01M15 10.2h.01"/><path d="M8.6 14.4a4.4 4.4 0 0 0 6.8 0"/>`,
+  camera: `<path d="M4.4 7.6h2.6l1.4-2.2h6.4l1.4 2.2h2.6a1.8 1.8 0 0 1 1.8 1.8v7.4a1.8 1.8 0 0 1-1.8 1.8H4.4a1.8 1.8 0 0 1-1.8-1.8V9.4a1.8 1.8 0 0 1 1.8-1.8Z"/><circle cx="12" cy="13" r="3"/>`,
+  film: `<rect x="3.4" y="5.4" width="17.2" height="13.2" rx="2.2"/><path d="M7.6 5.4v13.2M16.4 5.4v13.2M3.4 12h17.2"/>`,
+  play: `<circle cx="12" cy="12" r="8.6"/><path d="M10.4 8.8 15.4 12l-5 3.2Z"/>`,
+  question: `<path d="M20.4 12.6a7.6 7.6 0 0 1-8.2 7.6 8.4 8.4 0 0 1-3.4-.8L4.6 20.6l1.4-4a7.6 7.6 0 0 1-.8-3.4 7.6 7.6 0 0 1 7.6-7.6 7.6 7.6 0 0 1 7.6 7Z"/><path d="M9.8 9.6a2.2 2.2 0 1 1 2.8 2.6v1.4M12.6 16.4h.01"/>`,
+  balance: `<path d="M12 4.2v15.4M7.4 19.6h9.2"/><path d="M12 6.4 5.4 8.2M12 6.4l6.6 1.8"/><path d="M5.4 8.2 2.8 13.6h5.2ZM18.6 8.2l-2.6 5.4h5.2Z"/>`,
+  imageGen: `<rect x="4" y="5.4" width="16" height="13.4" rx="2.4"/><circle cx="9" cy="10.4" r="1.6"/><path d="M4.6 16.4 9.4 12l3 2.6 2.8-2.4 4.2 4.2"/><path d="M18.6 4.2l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6Z"/>`,
+  videoGen: `<rect x="3.4" y="6.6" width="12" height="10.8" rx="2.2"/><path d="M15.4 11.4 20.6 8.2v7.6l-5.2-3.2Z"/><path d="M19.4 4.2l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5Z"/>`,
+  textModel: `<path d="M4.4 6.6h15.2M12 6.6v11.6M9 18.2h6"/><path d="M18.6 3.4l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5Z"/>`,
+  imageModel: `<rect x="3.6" y="6" width="12.8" height="12" rx="2.2"/><circle cx="8.2" cy="10.4" r="1.4"/><path d="M4.2 16.2 8.4 12l2.6 2.4 2.4-2 3.6 3.8"/>`,
+  filmModel: `<rect x="2.8" y="6.4" width="13" height="11.2" rx="2.2"/><path d="M15.8 11 21.2 7.8v8.4l-5.4-3.2Z"/>`,
+
+  /* 补充：导航箭头、输入栏与通话控制 */
+  chevronLeft: `<path d="M14.4 5.6 8 12l6.4 6.4"/>`,
+  send: `<path d="M20.4 3.6 3.6 10.2l6.6 2.7 2.7 6.6Z"/><path d="M20.4 3.6 10.2 12.9"/>`,
+  micOff: `<path d="M4.4 4.4 19.6 19.6"/><path d="M9.2 5.8a2.8 2.8 0 0 1 5.6 0v5.4M9.2 9.6v3.8a2.8 2.8 0 0 0 4.3 2.4"/><path d="M5.8 11.4a6.2 6.2 0 0 0 9.4 5.3M12 17.6v3"/>`,
+  phoneOff: `<path d="M4.4 4.4 19.6 19.6"/><path d="M9.1 4.3H6.2A2 2 0 0 0 4.2 6.4c0 1.7.3 3.3.9 4.8M14.4 18.4c.6.1 1.2.2 1.8.2a2 2 0 0 0 2.2-2v-2.2l-3.8-1.6-1.7 1.9"/>`,
+  volumeOn: `<path d="M4.4 9.6h3.2L12 6v12l-4.4-3.6H4.4Z"/><path d="M15.6 9.6a3.6 3.6 0 0 1 0 4.8M18.2 7.2a7 7 0 0 1 0 9.6"/>`,
+  volumeOff: `<path d="M4.4 9.6h3.2L12 6v12l-4.4-3.6H4.4Z"/><path d="M16.2 10 20.6 14.4M20.6 10 16.2 14.4"/>`,
+  drag: `<circle cx="9" cy="6" r="1.35" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.35" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.35" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.35" fill="currentColor" stroke="none"/>`
+};
+
+function icon(name, size = 1, extraClass = "") {
+  const path = ICON_PATHS[name];
+  if (!path) return "";
+  const cls = extraClass ? ` class="${extraClass}"` : "";
+  const dim = size === 1 ? "1em" : `${size}px`;
+  return `<svg${cls} viewBox="0 0 24 24" width="${dim}" height="${dim}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${path}</svg>`;
+}
+
+/* ---------- 主题符号徽记 ----------
+   五个角色主题各有一枚专属徽记，绘制主题的代表元素，
+   用于主题卡、侧栏与锁屏，让"一眼认得出是谁"。
+   徽记用主题强调色描边，因此随主题自动变色。 */
+
+const THEME_EMBLEMS = {
+  xiamingxing: `<circle cx="12" cy="12" r="8.6" stroke-dasharray="2 3.4"/><path d="M12 6.6a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2Zm0 4.2v4.6M12 15.4c-1.6 0-2.6 1-2.9 2.4M12 15.4c1.6 0 2.6 1 2.9 2.4"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>`,
+  zuoran: `<path d="M12 4.2v15.6M5.4 8.2h13.2"/><path d="M5.4 8.2 3.2 13.4a3 3 0 0 0 4.4 0Zm13.2 0-2.2 5.2a3 3 0 0 0 4.4 0Z"/><path d="M8.6 19.8h6.8"/>`,
+  shenxinghui: `<path d="M12 2.8 13.5 9 19.6 10.5 13.5 12 12 18.2 10.5 12 4.4 10.5 10.5 9Z"/><path d="M18.6 3.4v3M20.6 5h-4M6.4 17.6v2.6M7.8 18.9H5"/>`,
+  yiyu: `<path d="M7.4 4.6h9.2l1.4 4.2-6 10-6-10Z"/><path d="M5.6 8.8h12.8M12 18.8V8.8"/>`,
+  baiqi: `<path d="M12 20.4c0-6.2.4-9.4 3.4-12.6-2 .2-3.2-.4-3.4-1.6-.2 1.2-1.4 1.8-3.4 1.6C11.6 11 12 14.2 12 20.4Z"/><path d="M12 20.4c-1.2-2.6-3.4-4-6-4.4M12 20.4c1.2-2.6 3.4-4 6-4.4"/>`
+};
+
+function themeEmblem(themeId, size = 1) {
+  const path = THEME_EMBLEMS[themeId];
+  if (!path) return "";
+  const dim = size === 1 ? "1em" : `${size}px`;
+  return `<svg class="theme-emblem" viewBox="0 0 24 24" width="${dim}" height="${dim}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${path}</svg>`;
+}
+
 function escapeHtml(value = "") {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -531,7 +642,16 @@ function renderAvatar(character, extra = "") {
 function renderChatAvatar(chat) {
   const members = chat.members.map((id) => getById(state.characters, id)).filter(Boolean);
   if (chat.type === "group") {
-    return `<span class="chat-avatar" style="background:${escapeAttr(members[0]?.color || hashColor(chat.title))};color:#fff">${escapeHtml(members.slice(0, 2).map((item) => item.avatarType === "image" ? initials(item.name) : (item.avatar || initials(item.name))).join(""))}</span>`;
+    /* 群头像只取前两位成员的首个字符。此前用 initials() 会取出两个汉字，
+       再和另一个成员的 emoji 拼在一起，三个字符在 46px 的圆里必然溢出。 */
+    const marks = members.slice(0, 2).map((item) => {
+      const source = item.avatarType === "image" || item.avatarType === "video" || !item.avatar
+        ? item.name
+        : item.avatar;
+      return [...String(source || "?")][0] || "?";
+    }).join("");
+    const sizeClass = [...marks].length > 1 ? " stack-two" : "";
+    return `<span class="chat-avatar${sizeClass}" style="background:${escapeAttr(members[0]?.color || hashColor(chat.title))};color:#fff">${escapeHtml(marks)}</span>`;
   }
   const character = members[0];
   if (character?.avatarType === "video" && character.avatar) {
@@ -613,7 +733,9 @@ function defaultCharacter() {
   const stamp = now();
   return {
     id: uid(), createdAt: stamp, updatedAt: stamp,
-    name: "", avatar: "🙂", avatarType: "emoji", avatarPoster: "", avatarPrompt: "",
+    /* 新角色默认不预置 emoji 头像：留空时由姓名首字生成，视觉上更接近"人"而不是表情符号。
+       用户仍可在角色编辑里改成照片、生成头像或自定义符号。 */
+    name: "", avatar: "", avatarType: "emoji", avatarPoster: "", avatarPrompt: "",
     avatarReference: null, tag: "", color: "",
     persona: "", personality: "", scenario: "", speechStyle: "", background: "",
     personalityDimensions: {
@@ -903,6 +1025,17 @@ function normalizeCharacterRecord(character) {
 
 /* ---------- 启动与数据加载 ---------- */
 
+/* 把 index.html 中的 data-icon 占位符渲染为 SVG。
+   index.html 是静态壳，放在 DOM 里的 data-icon 只需在启动时渲染一次。 */
+function hydrateIcons(root = document) {
+  $$("[data-icon]", root).forEach((node) => {
+    const name = node.getAttribute("data-icon");
+    const svg = icon(name);
+    if (!svg) return;
+    node.insertAdjacentHTML("afterbegin", svg);
+  });
+}
+
 async function bootstrap() {
   try {
     state.db = await openDatabase();
@@ -910,6 +1043,7 @@ async function bootstrap() {
     await loadAllData();
     await runDataMigrations();
     bindGlobalEvents();
+    hydrateIcons();
     startClock();
     renderThemeRail();
     applyTheme();
@@ -922,7 +1056,7 @@ async function bootstrap() {
     if (state.settings.lockEnabled && state.settings.lockPin) lockApp();
   } catch (error) {
     console.error(error);
-    $("#screen").innerHTML = `<div class="empty-state"><div class="empty-illustration">!</div><h2>应用初始化失败</h2><p>${escapeHtml(error.message || "无法打开本地数据库")}</p><button class="btn primary" onclick="location.reload()">重试</button></div>`;
+    $("#screen").innerHTML = `<div class="empty-state"><div class="empty-illustration">${icon("alert")}</div><h2>应用初始化失败</h2><p>${escapeHtml(error.message || "无法打开本地数据库")}</p><button class="btn primary" onclick="location.reload()">重试</button></div>`;
   }
 }
 
@@ -1110,11 +1244,11 @@ function openMessageActionSheet(messageId) {
   const message = state.currentMessages.find((item) => item.id === messageId);
   if (!message) return;
   openSheet("消息操作", [
-    { icon: "↩", title: "引用", action: "reply-message", messageId },
-    { icon: "⧉", title: "复制", action: "copy-message", messageId },
-    { icon: "✎", title: "编辑", action: "edit-message", messageId },
-    { icon: "↻", title: "重新生成", action: "regenerate-message", messageId },
-    { icon: "×", title: "删除", action: "delete-message", messageId }
+    { icon: icon("reply"), title: "引用", action: "reply-message", messageId },
+    { icon: icon("copy"), title: "复制", action: "copy-message", messageId },
+    { icon: icon("edit"), title: "编辑", action: "edit-message", messageId },
+    { icon: icon("regenerate"), title: "重新生成", action: "regenerate-message", messageId },
+    { icon: icon("trash"), title: "删除", action: "delete-message", messageId }
   ]);
 }
 
@@ -1241,14 +1375,19 @@ function renderThemeRail() {
   list.innerHTML = state.themes.map((theme) => {
     const vars = theme.vars || {};
     const active = theme.id === state.settings.theme ? "active" : "";
-    return `
-      <button class="theme-rail-item ${active}" data-action="select-theme" data-theme-id="${escapeAttr(theme.id)}">
-        <span class="theme-swatch">
+    /* 角色主题显示专属徽记，其余主题保留四色色板 */
+    const emblem = THEME_EMBLEMS[theme.id];
+    const swatch = emblem
+      ? `<span class="theme-swatch theme-swatch-emblem" style="background:${escapeAttr(vars.bg || "#fff")};color:${escapeAttr(vars.acc || "#888")}">${themeEmblem(theme.id)}</span>`
+      : `<span class="theme-swatch">
           <i style="background:${escapeAttr(vars.bg || "#fff")}"></i>
           <i style="background:${escapeAttr(vars.acc || "#888")}"></i>
           <i style="background:${escapeAttr(vars.bubble || "#eee")}"></i>
           <i style="background:${escapeAttr(vars.fg || "#222")}"></i>
-        </span>
+        </span>`;
+    return `
+      <button class="theme-rail-item ${active}" data-action="select-theme" data-theme-id="${escapeAttr(theme.id)}">
+        ${swatch}
         <span>${escapeHtml(theme.name)}</span>
       </button>`;
   }).join("");
@@ -1328,12 +1467,12 @@ function renderChatListPage(filter) {
   const activeQuickCount = state.quickReplies.filter((item) => state.settings.activeQuickReplyIds.includes(item.id)).length;
   const proactive = unreadProactive.length ? `
     <button class="proactive-bar" data-action="open-notifications">
-      <span class="spark">✦</span>
+      <span class="spark">${icon("spark")}</span>
       <span>${escapeHtml(unreadProactive[0].text)}${unreadProactive.length > 1 ? `，还有 ${unreadProactive.length - 1} 条角色动态` : ""}</span>
     </button>` : "";
   const list = chats.length ? `<div class="chat-list">${chats.map(renderChatRow).join("")}</div>` : `
     <div class="empty-state">
-      <div class="empty-illustration">${isGroup ? "⌁" : "✉"}</div>
+      <div class="empty-illustration">${icon(isGroup ? "groups" : "messages")}</div>
       <h2>${isGroup ? "还没有群聊" : "手机里还没有角色"}</h2>
       <p>${isGroup ? "先创建角色，再把多个角色拉进同一段关系里。" : "角色卡、聊天记录与世界的入口都在本机。你可以先创建角色，也可以导入现有角色卡。"}</p>
       <div class="empty-actions">
@@ -1348,9 +1487,9 @@ function renderChatListPage(filter) {
           <div class="topbar-title">${title}</div>
           ${isGroup ? `<div class="topbar-subtitle">角色依次发言，私密信息单独隔离</div>` : ""}
         </div>
-        <button class="icon-btn" data-action="open-notifications" title="通知中心">◉</button>
-        ${activeQuickCount ? `<button class="icon-btn" data-action="manage-quick-replies" title="快捷回复">⌘</button>` : ""}
-        <button class="icon-btn primary" data-action="open-create-sheet" title="新建">+</button>
+        <button class="icon-btn" data-action="open-notifications" title="通知中心">${icon("notification")}</button>
+        ${activeQuickCount ? `<button class="icon-btn" data-action="manage-quick-replies" title="快捷回复">${icon("quick")}</button>` : ""}
+        <button class="icon-btn primary" data-action="open-create-sheet" title="新建">${icon("plus")}</button>
       </header>
       <div class="page-scroll">${proactive}${list}</div>
     </div>`;
@@ -1372,7 +1511,7 @@ function renderChatRow(chat) {
         <div class="chat-line">
           <span class="chat-name">${escapeHtml(chat.title || names || "未命名聊天")}</span>
           <span class="tag">${escapeHtml(tag)}</span>
-          ${chat.pinned ? `<span class="pin-mark">⌖</span>` : ""}
+          ${chat.pinned ? `<span class="pin-mark">${icon("pin")}</span>` : ""}
         </div>
         <div class="chat-preview">${escapeHtml(preview)}</div>
       </div>
@@ -1415,15 +1554,15 @@ function renderChatPage() {
   return `
     <div class="page chat-page">
       <header class="topbar">
-        <button class="icon-btn" data-action="back-from-chat" title="返回">‹</button>
+        <button class="icon-btn" data-action="back-from-chat" title="返回">${icon("chevronLeft")}</button>
         <div class="chat-heading">
           <strong>${escapeHtml(chat.title || members.map((item) => item.name).join("、"))}</strong>
           <span>${typing.length ? `${escapeHtml(typing.join("、"))} 正在输入…` : (chat.type === "group" ? `${members.length} 位角色` : "在线")}${summaryStatus ? ` · ${summaryStatus}` : ""}${chat.type === "single" && memoryCount ? ` · 记忆 ${memoryCount}` : ""}</span>
         </div>
-        <button class="icon-btn" data-action="start-voice-call" title="语音通话">☎</button>
-        <button class="icon-btn" data-action="start-video-call" title="视频通话">▣</button>
-        <button class="icon-btn" data-action="search-chat" title="搜索">⌕</button>
-        <button class="icon-btn" data-action="chat-menu" title="菜单">⋯</button>
+        <button class="icon-btn" data-action="start-voice-call" title="语音通话">${icon("phoneCall")}</button>
+        <button class="icon-btn" data-action="start-video-call" title="视频通话">${icon("videoCall")}</button>
+        <button class="icon-btn" data-action="search-chat" title="搜索">${icon("search")}</button>
+        <button class="icon-btn" data-action="chat-menu" title="菜单">${icon("more")}</button>
       </header>
       ${chat.type === "group" && groupState ? `
         <div class="group-check">
@@ -1433,13 +1572,13 @@ function renderChatPage() {
       <div id="messageScroll" class="page-scroll">${renderMessages(chat, members)}</div>
       <div class="composer-wrap">
         ${quickButtons.length ? `<div class="quick-bar">${quickButtons.map(({ group, item }) => `<button class="quick-chip" data-action="use-quick-reply" data-qr-group="${escapeAttr(group.id)}" data-qr-id="${escapeAttr(String(item.id))}">${escapeHtml(item.label || item.message.slice(0, 12))}</button>`).join("")}</div>` : ""}
-        ${state.replyTo ? `<div class="reply-banner">↩ <span>${escapeHtml(messagePreview(state.replyTo))}</span><button data-action="cancel-reply">×</button></div>` : ""}
+        ${state.replyTo ? `<div class="reply-banner">${icon("reply")}<span>${escapeHtml(messagePreview(state.replyTo))}</span><button data-action="cancel-reply">${icon("close")}</button></div>` : ""}
         <div class="composer">
-          <button class="composer-btn" data-action="toggle-voice-record" title="录音">◉</button>
-          <button class="composer-btn" data-action="send-photo" title="相册图片">▧</button>
+          <button class="composer-btn" data-action="toggle-voice-record" title="录音">${icon("mic")}</button>
+          <button class="composer-btn" data-action="send-photo" title="相册图片">${icon("camera")}</button>
           <textarea id="chatInput" rows="1" placeholder="输入消息…" data-input="chat"></textarea>
-          <button class="composer-btn" data-action="chat-more" title="更多">＋</button>
-          <button class="send-btn" data-action="send-message" title="发送">➤</button>
+          <button class="composer-btn" data-action="chat-more" title="更多">${icon("plus")}</button>
+          <button class="send-btn" data-action="send-message" title="发送">${icon("send")}</button>
         </div>
       </div>
     </div>`;
@@ -1447,7 +1586,7 @@ function renderChatPage() {
 
 function renderMessages(chat, members) {
   if (!state.currentMessages.length) {
-    return `<div class="empty-state"><div class="empty-illustration">…</div><h2>开始这段对话</h2><p>第一条消息会持久化在本机。角色开场白不会自动写入，只有你主动使用才会创建。</p></div>`;
+    return `<div class="empty-state"><div class="empty-illustration">${icon("messages")}</div><h2>开始这段对话</h2><p>第一条消息会持久化在本机。角色开场白不会自动写入，只有你主动使用才会创建。</p></div>`;
   }
   let lastDate = "";
   return `
@@ -1517,7 +1656,7 @@ function renderMessageBody(message) {
     const audioReady = Boolean(message.meta.audioUrl || cachedMedia?.data);
     return `
       <div class="voice-card">
-        <button class="voice-play" data-action="play-voice" data-message-id="${escapeAttr(message.id)}" ${message.meta.mediaId && !audioReady ? `data-media-id="${escapeAttr(message.meta.mediaId)}" disabled` : ""}>▶</button>
+        <button class="voice-play" data-action="play-voice" data-message-id="${escapeAttr(message.id)}" ${message.meta.mediaId && !audioReady ? `data-media-id="${escapeAttr(message.meta.mediaId)}" disabled` : ""}>${icon("play")}</button>
         <span class="waveform">${waveform.map((height) => `<i style="height:${clamp(height, 4, 24)}px"></i>`).join("")}</span>
         <span class="voice-duration">${formatDuration(message.meta.duration)}</span>
       </div>
@@ -1548,7 +1687,7 @@ function renderMessageBody(message) {
     const location = message.meta.location || {};
     return `
       <div class="location-message">
-        <div class="location-map"><span>⌖</span></div>
+        <div class="location-map"><span>${icon("location")}</span></div>
         <strong>${escapeHtml(location.label || message.text || "我在这里")}</strong>
         <small>${escapeHtml(location.detail || "位置分享")}</small>
       </div>`;
@@ -1556,7 +1695,7 @@ function renderMessageBody(message) {
   if (message.type === "transfer") {
     return `
       <div class="transfer-message ${message.meta.status === "accepted" ? "accepted" : ""}">
-        <span class="transfer-icon">¥</span>
+        <span class="transfer-icon">${icon("transferMoney")}</span>
         <span><strong>${escapeHtml(message.meta.title || "红包")}</strong><small>${formatMoney(message.meta.amountFen || 0)} · ${message.meta.status === "accepted" ? "已领取" : "待领取"}</small></span>
       </div>`;
   }
@@ -3370,15 +3509,15 @@ function renderDatesPage() {
     <div class="page">
       <header class="topbar">
         <div class="topbar-main"><div class="topbar-title">约会</div></div>
-        <button class="icon-btn" data-action="open-schedules" title="日程">◷</button>
-        <button class="icon-btn primary" data-action="create-date" title="新建约会">+</button>
+        <button class="icon-btn" data-action="open-schedules" title="日程">${icon("schedule")}</button>
+        <button class="icon-btn primary" data-action="create-date" title="新建约会">${icon("plus")}</button>
       </header>
       <div class="page-scroll page-content">
         <div class="surface">
           <div class="surface-title"><strong>剧情关系</strong><span>数值只在本页出现</span></div>
           ${dates.length ? dates.map(renderDateCard).join("") : `
             <div class="empty-state" style="min-height:300px;padding:20px">
-              <div class="empty-illustration">◇</div>
+              <div class="empty-illustration">${icon("dates")}</div>
               <h2>还没有约会剧情</h2>
               <p>为角色建立 beat、分歧点与多结局。关系变化只会显示在这里，不会进入日常聊天。</p>
               <button class="btn primary" data-action="create-date">新建约会</button>
@@ -3422,7 +3561,7 @@ function renderHealthPage() {
           <div class="topbar-title">体征</div>
           <div class="topbar-subtitle">原始数字只在客户端转换，感知量才进入角色提示词</div>
         </div>
-        <button class="icon-btn primary" data-action="edit-health" title="录入数据">+</button>
+        <button class="icon-btn primary" data-action="edit-health" title="录入数据">${icon("plus")}</button>
       </header>
       <div class="page-scroll page-content">
         ${health.updatedAt ? `
@@ -3450,7 +3589,7 @@ function renderHealthPage() {
             </div>
           </div>` : `
           <div class="empty-state" style="min-height:520px">
-            <div class="empty-illustration">♡</div>
+            <div class="empty-illustration">${icon("health")}</div>
             <h2>还没有体征数据</h2>
             <p>这里可以手动录入、导入 JSON，或对接你已有的健康数据适配层。角色只会在获得授权且状态变化时感知到大致状态。</p>
             <div class="empty-actions">
@@ -3485,22 +3624,22 @@ function renderProfilePage() {
       </div>
       <div class="dashboard-grid">
         <button class="dashboard-card primary" data-action="profile-tab" data-tab="models">
-          <span class="dashboard-icon">⇄</span>
+          <span class="dashboard-icon">${icon("api")}</span>
           <strong>API 与模型</strong>
           <small>${state.apiConfigs.filter((item) => item.category === "text").length} 个文字模型 · 点击配置</small>
         </button>
         <button class="dashboard-card" data-action="profile-tab" data-tab="content">
-          <span class="dashboard-icon">✦</span>
+          <span class="dashboard-icon">${icon("spark")}</span>
           <strong>创作资源</strong>
           <small>${state.characters.length} 角色 · ${state.worldbooks.length} 世界书 · ${state.presets.length} 预设</small>
         </button>
         <button class="dashboard-card" data-action="open-theme-manager">
-          <span class="dashboard-icon">◐</span>
+          <span class="dashboard-icon">${icon("palette")}</span>
           <strong>主题外观</strong>
-          <small>六套主题、日夜模式和字体</small>
+          <small>十一套主题、日夜模式和字体</small>
         </button>
         <button class="dashboard-card" data-action="open-settings">
-          <span class="dashboard-icon">⚙</span>
+          <span class="dashboard-icon">${icon("settings")}</span>
           <strong>应用设置</strong>
           <small>聊天、代理、锁屏和主动消息</small>
         </button>
@@ -3517,12 +3656,12 @@ function renderProfilePage() {
     content = `
       <div class="section-heading"><div><strong>创作资源</strong><span>角色卡、世界书和提示词集中管理</span></div></div>
       <div class="content-resource-grid">
-        ${renderContentResourceCard("characters", "☺", "角色库", state.characters.length, "角色人设、头像、开场白和主动消息")}
-        ${renderContentResourceCard("worldbooks", "▤", "世界书", state.worldbooks.length, "关键词、常驻条目和私密可见性")}
-        ${renderContentResourceCard("presets", "≡", "提示词预设", state.presets.length, "提示词顺序、注入位置和采样参数")}
-        ${renderContentResourceCard("regex", "/.*/", "正则脚本", state.regexScripts.length, "状态栏、选择器和内容清洗")}
-        ${renderContentResourceCard("quick", "⌘", "快捷回复", state.quickReplies.length, "聊天输入栏的一键按钮")}
-        ${renderContentResourceCard("memories", "✦", "纪念卡", state.settings.memoryCards?.length || 0, "约会和关系里程碑")}
+        ${renderContentResourceCard("characters", icon("character"), "角色库", state.characters.length, "角色人设、头像、开场白和主动消息")}
+        ${renderContentResourceCard("worldbooks", icon("book"), "世界书", state.worldbooks.length, "关键词、常驻条目和私密可见性")}
+        ${renderContentResourceCard("presets", icon("preset"), "提示词预设", state.presets.length, "提示词顺序、注入位置和采样参数")}
+        ${renderContentResourceCard("regex", icon("regex"), "正则脚本", state.regexScripts.length, "状态栏、选择器和内容清洗")}
+        ${renderContentResourceCard("quick", icon("quick"), "快捷回复", state.quickReplies.length, "聊天输入栏的一键按钮")}
+        ${renderContentResourceCard("memories", icon("memory"), "纪念卡", state.settings.memoryCards?.length || 0, "约会和关系里程碑")}
       </div>
       <div class="surface">
         <div class="surface-title"><strong>导入</strong><span>从现有素材快速开始</span></div>
@@ -3559,12 +3698,12 @@ function renderProfilePage() {
     content = `
       <div class="section-heading"><div><strong>数据与工具</strong><span>备份、日程和本机功能</span></div></div>
       <div class="menu-list">
-        <button class="menu-item" data-action="export-backup"><span class="menu-icon">↑</span><span><strong>导出存档</strong><small>备份全部本机数据</small></span><span>›</span></button>
-        <button class="menu-item" data-action="import-file" data-import-kind="backup"><span class="menu-icon">↺</span><span><strong>恢复存档</strong><small>导入另一台设备的备份</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-notifications"><span class="menu-icon">◉</span><span><strong>通知中心</strong><small>${unreadNotifications} 条未读</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-moments"><span class="menu-icon">◎</span><span><strong>朋友圈</strong><small>${state.settings.moments?.length || 0} 条动态</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-schedules"><span class="menu-icon">◷</span><span><strong>纪念日与日程</strong><small>${state.settings.schedules?.length || 0} 个提醒</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-wallet"><span class="menu-icon">¥</span><span><strong>娱乐钱包</strong><small>${formatMoney(state.settings.walletBalanceFen || 0)}</small></span><span>›</span></button>
+        <button class="menu-item" data-action="export-backup"><span class="menu-icon">${icon("upload")}</span><span><strong>导出存档</strong><small>备份全部本机数据</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="import-file" data-import-kind="backup"><span class="menu-icon">${icon("restore")}</span><span><strong>恢复存档</strong><small>导入另一台设备的备份</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-notifications"><span class="menu-icon">${icon("notification")}</span><span><strong>通知中心</strong><small>${unreadNotifications} 条未读</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-moments"><span class="menu-icon">${icon("moment")}</span><span><strong>朋友圈</strong><small>${state.settings.moments?.length || 0} 条动态</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-schedules"><span class="menu-icon">${icon("schedule")}</span><span><strong>纪念日与日程</strong><small>${state.settings.schedules?.length || 0} 个提醒</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-wallet"><span class="menu-icon">${icon("wallet")}</span><span><strong>娱乐钱包</strong><small>${formatMoney(state.settings.walletBalanceFen || 0)}</small></span><span>${icon("chevron")}</span></button>
       </div>
       <div class="surface">
         <div class="surface-title"><strong>隐私说明</strong><span>本机优先</span></div>
@@ -3576,8 +3715,8 @@ function renderProfilePage() {
     <div class="page">
       <header class="topbar">
         <div class="topbar-main"><div class="topbar-title">设置</div><div class="topbar-subtitle">模型、内容与本机数据</div></div>
-        <button class="icon-btn" data-action="open-notifications" title="通知">◉</button>
-        <button class="icon-btn" data-action="open-settings" title="更多设置">⚙</button>
+        <button class="icon-btn" data-action="open-notifications" title="通知">${icon("notification")}</button>
+        <button class="icon-btn" data-action="open-settings" title="更多设置">${icon("settings")}</button>
       </header>
       <div class="tabs">${tabs.map(([id, label]) => `<button class="tab ${state.profileTab === id ? "active" : ""}" data-action="profile-tab" data-tab="${id}">${label}</button>`).join("")}</div>
       <div class="page-scroll page-content">${content}</div>
@@ -3596,7 +3735,8 @@ function renderContentResourceCard(tab, icon, title, count, description) {
 function renderDefaultApiRow(category, label, defaultId, configs) {
   const config = getById(configs, defaultId) || configs.find((item) => item.enabled);
   const detail = config ? `${config.name || config.provider} · ${config.model}` : "尚未配置";
-  return `<button class="menu-item" data-action="open-api-manager-category" data-category="${escapeAttr(category)}"><span class="menu-icon">${category === "text" ? "文" : category === "image" ? "图" : "影"}</span><span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></span><span>›</span></button>`;
+  const categoryIcon = category === "text" ? "textModel" : category === "image" ? "imageModel" : "filmModel";
+  return `<button class="menu-item" data-action="open-api-manager-category" data-category="${escapeAttr(category)}"><span class="menu-icon">${icon(categoryIcon)}</span><span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></span><span>${icon("chevron")}</span></button>`;
 }
 
 function openContentManager(tab = "characters") {
@@ -3627,31 +3767,31 @@ function renderContentManagerList() {
   if (state.contentTab === "characters") {
     return state.characters.length
       ? state.characters.map(renderCharacterCard).join("")
-      : `<div class="empty-state" style="min-height:300px"><div class="empty-illustration">☺</div><h2>角色库为空</h2><p>可以手动创建，也可以从相册导入 PNG 角色卡。</p><div class="empty-actions"><button class="btn primary" data-action="create-character">手动创建</button><button class="btn" data-action="import-character-png">导入 PNG</button></div></div>`;
+      : `<div class="empty-state" style="min-height:300px"><div class="empty-illustration">${icon("character")}</div><h2>角色库为空</h2><p>可以手动创建，也可以从相册导入 PNG 角色卡。</p><div class="empty-actions"><button class="btn primary" data-action="create-character">手动创建</button><button class="btn" data-action="import-character-png">导入 PNG</button></div></div>`;
   }
   if (state.contentTab === "worldbooks") {
     return state.worldbooks.length
       ? state.worldbooks.map((book) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(book.name || "未命名世界书")}</strong><small>${book.entries.length} 条 · ${escapeHtml(book.description || "无描述")}</small></div><span class="tag">${escapeHtml(book.rawFormat || "manual")}</span></div><div class="card-actions"><button class="btn small primary" data-action="manage-worldbook" data-id="${escapeAttr(book.id)}">编辑</button><button class="btn small" data-action="test-worldbook" data-id="${escapeAttr(book.id)}">触发测试</button><button class="btn small" data-action="export-worldbook" data-id="${escapeAttr(book.id)}">导出</button><button class="btn small danger" data-action="delete-worldbook" data-id="${escapeAttr(book.id)}">删除</button></div></article>`).join("")
-      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">▤</div><h2>世界书为空</h2><p>支持 SillyTavern 对象索引和数组格式。</p><button class="btn primary" data-action="create-worldbook">新建世界书</button></div>`;
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">${icon("book")}</div><h2>世界书为空</h2><p>支持 SillyTavern 对象索引和数组格式。</p><button class="btn primary" data-action="create-worldbook">新建世界书</button></div>`;
   }
   if (state.contentTab === "presets") {
     return state.presets.length
       ? state.presets.map((preset) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(preset.name || "未命名预设")}</strong><small>${preset.prompts.length} 条提示词 · 上下文 ${preset.openai_max_context}</small></div></div><div class="card-actions"><button class="btn small primary" data-action="manage-preset" data-id="${escapeAttr(preset.id)}">编辑</button><button class="btn small" data-action="set-default-preset" data-id="${escapeAttr(preset.id)}">设为默认</button><button class="btn small danger" data-action="delete-preset" data-id="${escapeAttr(preset.id)}">删除</button></div></article>`).join("")
-      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">≡</div><h2>预设为空</h2><p>控制提示词顺序、注入位置和采样参数。</p><button class="btn primary" data-action="create-preset">新建预设</button></div>`;
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">${icon("preset")}</div><h2>预设为空</h2><p>控制提示词顺序、注入位置和采样参数。</p><button class="btn primary" data-action="create-preset">新建预设</button></div>`;
   }
   if (state.contentTab === "regex") {
     return state.regexScripts.length
       ? state.regexScripts.map((script) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(script.scriptName || "未命名脚本")}</strong><small>placement ${script.placement.join(",")} · ${script.disabled ? "停用" : "启用"}</small></div></div><div class="entry-preview" style="margin-top:8px">${escapeHtml(script.findRegex)}</div><div class="card-actions"><button class="btn small primary" data-action="edit-regex" data-id="${escapeAttr(script.id)}">编辑</button><button class="btn small" data-action="toggle-regex" data-id="${escapeAttr(script.id)}">${script.disabled ? "启用" : "停用"}</button><button class="btn small danger" data-action="delete-regex" data-id="${escapeAttr(script.id)}">删除</button></div></article>`).join("")
-      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">/.*/</div><h2>没有正则脚本</h2><p>用于状态栏、选择器和提示词处理。</p><button class="btn primary" data-action="create-regex">新建脚本</button></div>`;
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">${icon("regex")}</div><h2>没有正则脚本</h2><p>用于状态栏、选择器和提示词处理。</p><button class="btn primary" data-action="create-regex">新建脚本</button></div>`;
   }
   if (state.contentTab === "quick") {
     return state.quickReplies.length
       ? state.quickReplies.map((group) => `<article class="manager-card"><div class="card-head"><div class="card-head-main"><strong>${escapeHtml(group.name || "未命名快捷组")}</strong><small>${group.qrList.length} 个按钮 · ${state.settings.activeQuickReplyIds.includes(group.id) ? "聊天中显示" : "未启用"}</small></div></div><div class="card-actions"><button class="btn small primary" data-action="edit-quick" data-id="${escapeAttr(group.id)}">编辑</button><button class="btn small" data-action="toggle-quick-group" data-id="${escapeAttr(group.id)}">${state.settings.activeQuickReplyIds.includes(group.id) ? "停用" : "启用"}</button><button class="btn small danger" data-action="delete-quick" data-id="${escapeAttr(group.id)}">删除</button></div></article>`).join("")
-      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">⌘</div><h2>没有快捷回复</h2><button class="btn primary" data-action="create-quick">新建快捷组</button></div>`;
+      : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">${icon("quick")}</div><h2>没有快捷回复</h2><button class="btn primary" data-action="create-quick">新建快捷组</button></div>`;
   }
   return state.settings.memoryCards.length
     ? state.settings.memoryCards.map(renderMemoryCard).join("")
-    : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">✦</div><h2>还没有纪念卡</h2><p>在聊天菜单里选择“这一刻值得记住”。</p></div>`;
+    : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">${icon("memory")}</div><h2>还没有纪念卡</h2><p>在聊天菜单里选择“这一刻值得记住”。</p></div>`;
 }
 
 function renderProfilePageLegacy() {
@@ -3664,7 +3804,7 @@ function renderProfilePageLegacy() {
   if (state.profileTab === "characters") {
     content = state.characters.length ? state.characters.map(renderCharacterCard).join("") : `
       <div class="empty-state" style="min-height:420px">
-        <div class="empty-illustration">☺</div>
+        <div class="empty-illustration">${icon("character")}</div>
         <h2>角色库为空</h2>
         <p>手动创建、文字提炼，或导入 JSON / PNG 角色卡。角色卡中的 YAML、XML 富文本会原样保留。</p>
         <div class="empty-actions">
@@ -3679,31 +3819,31 @@ function renderProfilePageLegacy() {
       <article class="manager-card">
         <div class="card-head"><div class="card-head-main"><strong>${escapeHtml(book.name || "未命名世界书")}</strong><small>${book.entries.length} 条 · ${escapeHtml(book.description || "无描述")}</small></div><span class="tag">${escapeHtml(book.rawFormat || "manual")}</span></div>
         <div class="card-actions"><button class="btn small primary" data-action="manage-worldbook" data-id="${escapeAttr(book.id)}">编辑</button><button class="btn small" data-action="test-worldbook" data-id="${escapeAttr(book.id)}">触发测试</button><button class="btn small" data-action="export-worldbook" data-id="${escapeAttr(book.id)}">导出</button><button class="btn small danger" data-action="delete-worldbook" data-id="${escapeAttr(book.id)}">删除</button></div>
-      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">▤</div><h2>世界书为空</h2><p>支持 SillyTavern 的对象索引与数组两种格式。</p><button class="btn primary" data-action="create-worldbook">新建世界书</button></div>`;
+      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">${icon("book")}</div><h2>世界书为空</h2><p>支持 SillyTavern 的对象索引与数组两种格式。</p><button class="btn primary" data-action="create-worldbook">新建世界书</button></div>`;
   } else if (state.profileTab === "presets") {
     content = state.presets.length ? state.presets.map((preset) => `
       <article class="manager-card">
         <div class="card-head"><div class="card-head-main"><strong>${escapeHtml(preset.name || "未命名预设")}</strong><small>${preset.prompts.length} 条提示词 · 上下文 ${preset.openai_max_context}</small></div></div>
         <div class="card-actions"><button class="btn small primary" data-action="manage-preset" data-id="${escapeAttr(preset.id)}">编辑</button><button class="btn small" data-action="set-default-preset" data-id="${escapeAttr(preset.id)}">设为默认</button><button class="btn small" data-action="export-preset" data-id="${escapeAttr(preset.id)}">导出</button><button class="btn small danger" data-action="delete-preset" data-id="${escapeAttr(preset.id)}">删除</button></div>
-      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">≡</div><h2>预设为空</h2><p>预设控制提示词排序、注入位置、深度和采样参数。</p><button class="btn primary" data-action="create-preset">新建预设</button></div>`;
+      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">${icon("preset")}</div><h2>预设为空</h2><p>预设控制提示词排序、注入位置、深度和采样参数。</p><button class="btn primary" data-action="create-preset">新建预设</button></div>`;
   } else if (state.profileTab === "regex") {
     content = state.regexScripts.length ? state.regexScripts.map((script) => `
       <article class="manager-card">
         <div class="card-head"><div class="card-head-main"><strong>${escapeHtml(script.scriptName || "未命名脚本")}</strong><small>placement ${script.placement.join(",")} · ${script.disabled ? "停用" : "启用"}</small></div></div>
         <div class="entry-preview" style="margin-top:8px">${escapeHtml(script.findRegex)}</div>
         <div class="card-actions"><button class="btn small primary" data-action="edit-regex" data-id="${escapeAttr(script.id)}">编辑</button><button class="btn small" data-action="toggle-regex" data-id="${escapeAttr(script.id)}">${script.disabled ? "启用" : "停用"}</button><button class="btn small" data-action="export-regex" data-id="${escapeAttr(script.id)}">导出</button><button class="btn small danger" data-action="delete-regex" data-id="${escapeAttr(script.id)}">删除</button></div>
-      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">/.*/</div><h2>没有正则脚本</h2><p>用于状态栏、选择器、内容清洗与提示词注入。</p><button class="btn primary" data-action="create-regex">新建脚本</button></div>`;
+      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">${icon("regex")}</div><h2>没有正则脚本</h2><p>用于状态栏、选择器、内容清洗与提示词注入。</p><button class="btn primary" data-action="create-regex">新建脚本</button></div>`;
   } else if (state.profileTab === "quick") {
     content = state.quickReplies.length ? state.quickReplies.map((group) => `
       <article class="manager-card">
         <div class="card-head"><div class="card-head-main"><strong>${escapeHtml(group.name || "未命名快捷组")}</strong><small>${group.qrList.length} 个按钮 · ${state.settings.activeQuickReplyIds.includes(group.id) ? "聊天中显示" : "未启用"}</small></div></div>
         <div class="card-actions"><button class="btn small primary" data-action="edit-quick" data-id="${escapeAttr(group.id)}">编辑</button><button class="btn small" data-action="toggle-quick-group" data-id="${escapeAttr(group.id)}">${state.settings.activeQuickReplyIds.includes(group.id) ? "停用" : "启用"}</button><button class="btn small danger" data-action="delete-quick" data-id="${escapeAttr(group.id)}">删除</button></div>
-      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">⌘</div><h2>没有快捷回复</h2><p>导入 SillyTavern QuickReply JSON，或手动建立按钮组。</p><button class="btn primary" data-action="create-quick">新建快捷组</button></div>`;
+      </article>`).join("") : `<div class="empty-state" style="min-height:420px"><div class="empty-illustration">${icon("quick")}</div><h2>没有快捷回复</h2><p>导入 SillyTavern QuickReply JSON，或手动建立按钮组。</p><button class="btn primary" data-action="create-quick">新建快捷组</button></div>`;
   } else if (state.profileTab === "memories") {
     const memories = state.settings.memoryCards || [];
     content = memories.length ? memories.map(renderMemoryCard).join("") : `
       <div class="empty-state" style="min-height:420px">
-        <div class="empty-illustration">✦</div>
+        <div class="empty-illustration">${icon("memory")}</div>
         <h2>还没有纪念卡</h2>
         <p>约会完成、群聊里程碑，或聊天菜单里的“这一刻值得记住”都会保留一份关系片段。</p>
       </div>`;
@@ -3712,15 +3852,15 @@ function renderProfilePageLegacy() {
   } else {
     content = `
       <div class="menu-list">
-        <button class="menu-item" data-action="open-api-manager"><span class="menu-icon">⇄</span><span><strong>API 配置</strong><small>文字、图片、视频、代理与连接测试</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-settings"><span class="menu-icon">⚙</span><span><strong>设置</strong><small>外观、字体、发送、锁屏与用户资料</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-notifications"><span class="menu-icon">◉</span><span><strong>通知中心</strong><small>${unreadNotifications} 条未读</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-moments"><span class="menu-icon">◎</span><span><strong>朋友圈</strong><small>${state.settings.moments?.length || 0} 条动态</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-wallet"><span class="menu-icon">¥</span><span><strong>娱乐钱包</strong><small>${formatMoney(state.settings.walletBalanceFen || 0)} · 本地互动数值</small></span><span>›</span></button>
-        <button class="menu-item" data-action="open-schedules"><span class="menu-icon">◷</span><span><strong>纪念日与日程</strong><small>${state.settings.schedules?.length || 0} 个提醒</small></span><span>›</span></button>
-        <button class="menu-item" data-action="import-file" data-import-kind="auto"><span class="menu-icon">↓</span><span><strong>导入文件</strong><small>自动识别角色卡、世界书、预设、主题、正则、快捷回复与存档</small></span><span>›</span></button>
-        <button class="menu-item" data-action="export-backup"><span class="menu-icon">↑</span><span><strong>导出存档</strong><small>包含 IndexedDB 中的全部业务数据</small></span><span>›</span></button>
-        <button class="menu-item" data-action="import-file" data-import-kind="backup"><span class="menu-icon">↺</span><span><strong>恢复存档</strong><small>恢复会替换当前本地数据</small></span><span>›</span></button>
+        <button class="menu-item" data-action="open-api-manager"><span class="menu-icon">${icon("api")}</span><span><strong>API 配置</strong><small>文字、图片、视频、代理与连接测试</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-settings"><span class="menu-icon">${icon("settings")}</span><span><strong>设置</strong><small>外观、字体、发送、锁屏与用户资料</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-notifications"><span class="menu-icon">${icon("notification")}</span><span><strong>通知中心</strong><small>${unreadNotifications} 条未读</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-moments"><span class="menu-icon">${icon("moment")}</span><span><strong>朋友圈</strong><small>${state.settings.moments?.length || 0} 条动态</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-wallet"><span class="menu-icon">${icon("wallet")}</span><span><strong>娱乐钱包</strong><small>${formatMoney(state.settings.walletBalanceFen || 0)} · 本地互动数值</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="open-schedules"><span class="menu-icon">${icon("schedule")}</span><span><strong>纪念日与日程</strong><small>${state.settings.schedules?.length || 0} 个提醒</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="import-file" data-import-kind="auto"><span class="menu-icon">${icon("download")}</span><span><strong>导入文件</strong><small>自动识别角色卡、世界书、预设、主题、正则、快捷回复与存档</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="export-backup"><span class="menu-icon">${icon("upload")}</span><span><strong>导出存档</strong><small>包含 IndexedDB 中的全部业务数据</small></span><span>${icon("chevron")}</span></button>
+        <button class="menu-item" data-action="import-file" data-import-kind="backup"><span class="menu-icon">${icon("restore")}</span><span><strong>恢复存档</strong><small>恢复会替换当前本地数据</small></span><span>${icon("chevron")}</span></button>
       </div>
       <div class="surface">
         <div class="surface-title"><strong>存储状态</strong><span>IndexedDB · pocketlink</span></div>
@@ -3736,8 +3876,8 @@ function renderProfilePageLegacy() {
     <div class="page">
       <header class="topbar">
         <div class="topbar-main"><div class="topbar-title">设置</div><div class="topbar-subtitle">本机数据与创作资源</div></div>
-        <button class="icon-btn" data-action="open-notifications" title="通知">◉</button>
-        <button class="icon-btn" data-action="open-settings" title="设置">⚙</button>
+        <button class="icon-btn" data-action="open-notifications" title="通知">${icon("notification")}</button>
+        <button class="icon-btn" data-action="open-settings" title="设置">${icon("settings")}</button>
       </header>
       <div class="tabs">${tabs.map(([id, label]) => `<button class="tab ${state.profileTab === id ? "active" : ""}" data-action="profile-tab" data-tab="${id}">${label}</button>`).join("")}</div>
       <div class="page-scroll page-content">${content}</div>
@@ -3766,13 +3906,25 @@ function renderCharacterCard(character) {
 function renderThemeCard(theme) {
   const active = theme.id === state.settings.theme ? "active" : "";
   const vars = theme.vars || {};
+  /* 角色主题：预览区用主题装饰层做底，中央放专属徽记，右侧保留真实色板 */
+  const emblem = THEME_EMBLEMS[theme.id];
+  const preview = emblem
+    ? `<div class="theme-preview theme-preview-emblem" data-theme-preview="${escapeAttr(theme.id)}">
+         <span class="theme-preview-emblem-mark">${themeEmblem(theme.id)}</span>
+         <span class="theme-preview-chips">
+           <i style="background:${escapeAttr(vars.acc || "#888")}"></i>
+           <i style="background:${escapeAttr(vars.acc2 || vars.acc || "#888")}"></i>
+           <i style="background:${escapeAttr(vars.fg || "#222")}"></i>
+         </span>
+       </div>`
+    : `<div class="theme-preview">
+         <i style="background:${escapeAttr(vars.bg || "#fff")}"></i>
+         <i style="background:${escapeAttr(vars.acc || "#888")}"></i>
+         <i style="background:${escapeAttr(vars.bubble || "#eee")}"></i>
+       </div>`;
   return `
     <article class="theme-card ${active}" data-action="select-theme" data-theme-id="${escapeAttr(theme.id)}">
-      <div class="theme-preview">
-        <i style="background:${escapeAttr(vars.bg || "#fff")}"></i>
-        <i style="background:${escapeAttr(vars.acc || "#888")}"></i>
-        <i style="background:${escapeAttr(vars.bubble || "#eee")}"></i>
-      </div>
+      ${preview}
       <strong>${escapeHtml(theme.name)}</strong>
       <small>${escapeHtml(theme.desc || (theme.builtIn ? "内置主题" : "自定义主题"))}</small>
     </article>`;
@@ -3782,7 +3934,7 @@ function renderMemoryCard(memory) {
   const characters = (memory.characterIds || []).map((id) => getById(state.characters, id)).filter(Boolean);
   return `
     <article class="memory-card">
-      ${memory.imageUrl ? `<img class="memory-card-image" src="${escapeAttr(memory.imageUrl)}" alt="">` : `<div class="memory-card-pattern">✦</div>`}
+      ${memory.imageUrl ? `<img class="memory-card-image" src="${escapeAttr(memory.imageUrl)}" alt="">` : `<div class="memory-card-pattern">${icon("spark")}</div>`}
       <div class="memory-card-body">
         <div class="card-head">
           <div class="card-head-main"><strong>${escapeHtml(memory.title || "纪念卡")}</strong><small>${formatTime(memory.createdAt, true)}</small></div>
@@ -3798,11 +3950,11 @@ function renderMemoryCard(memory) {
 
 function renderMemoryItem(memory) {
   const icons = {
-    fact: "●",
-    relationship: "♡",
-    promise: "✓",
-    preference: "★",
-    event: "◇"
+    fact: icon("memory"),
+    relationship: icon("health"),
+    promise: icon("lock"),
+    preference: icon("spark"),
+    event: icon("dates")
   };
   const labels = {
     fact: "事实",
@@ -3813,12 +3965,12 @@ function renderMemoryItem(memory) {
   };
   return `
     <div class="memory-item">
-      <span class="memory-type">${icons[memory.type] || "●"}</span>
+      <span class="memory-type">${icons[memory.type] || icon("spark")}</span>
       <span class="memory-item-main">
         <strong>${escapeHtml(memory.content)}</strong>
         <small>${escapeHtml(labels[memory.type] || "事实")} · ${formatTime(memory.createdAt, true)} · 检索 ${memory.accessCount || 0} 次</small>
       </span>
-      <button type="button" class="icon-btn danger" data-action="delete-memory" data-id="${escapeAttr(memory.id)}">×</button>
+      <button type="button" class="icon-btn danger" data-action="delete-memory" data-id="${escapeAttr(memory.id)}">${icon("close")}</button>
     </div>`;
 }
 
@@ -3835,7 +3987,7 @@ function openSheet(title, items) {
           <button class="menu-item" data-action="${escapeAttr(item.action)}" ${item.id ? `data-id="${escapeAttr(item.id)}"` : ""} ${item.messageId ? `data-message-id="${escapeAttr(item.messageId)}"` : ""}>
             <span class="menu-icon">${item.icon}</span>
             <span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.subtitle || "")}</small></span>
-            <span class="menu-chevron">›</span>
+            <span class="menu-chevron">${icon("chevron")}</span>
           </button>`).join("")}
       </div>
     </div>`;
@@ -3854,7 +4006,7 @@ function openModal({ title, body, actions = [], size = "normal" }) {
     <div class="modal-panel" style="${size === "wide" ? "width:min(920px,100%)" : ""}">
       <header class="modal-head">
         <h2>${escapeHtml(title)}</h2>
-        <button class="icon-btn" data-action="close-modal" title="关闭">×</button>
+        <button class="icon-btn" data-action="close-modal" title="关闭">${icon("close")}</button>
       </header>
       <div class="modal-body"><form id="modalForm">${body}</form></div>
       ${actions.length ? `<footer class="modal-actions">${actions.map((action) => `<button type="button" class="btn ${action.primary ? "primary" : ""} ${action.danger ? "danger" : ""}" data-action="modal-action" data-modal-action="${escapeAttr(action.id)}">${escapeHtml(action.label)}</button>`).join("")}</footer>` : ""}
@@ -3908,13 +4060,13 @@ function readForm(form) {
 
 function openCreateSheet() {
   openSheet("新建", [
-    { icon: "☺", title: "创建角色", subtitle: "手动填写人设与开场白", action: "create-character" },
-    { icon: "⌁", title: "创建群聊", subtitle: "选择多个角色建立群聊", action: "create-group" },
-    { icon: "✉", title: "与现有角色开新对话", subtitle: "同一角色可以拥有多个独立聊天", action: "new-chat-existing" },
-    { icon: "↓", title: "导入 JSON 角色卡", subtitle: "SillyTavern V2 / V3 JSON", action: "import-character-json" },
-    { icon: "▧", title: "从相册导入 PNG 角色卡", subtitle: "选择相册或文件中的 PNG", action: "import-character-png" },
-    { icon: "✦", title: "粘贴文字创建角色", subtitle: "由已配置模型提炼人设字段", action: "create-character-from-text" },
-    { icon: "◉", title: "发布朋友圈", subtitle: "记录一条只在本地保存的动态", action: "create-moment" }
+    { icon: icon("character"), title: "创建角色", subtitle: "手动填写人设与开场白", action: "create-character" },
+    { icon: icon("groups"), title: "创建群聊", subtitle: "选择多个角色建立群聊", action: "create-group" },
+    { icon: icon("chatNew"), title: "与现有角色开新对话", subtitle: "同一角色可以拥有多个独立聊天", action: "new-chat-existing" },
+    { icon: icon("importJson"), title: "导入 JSON 角色卡", subtitle: "SillyTavern V2 / V3 JSON", action: "import-character-json" },
+    { icon: icon("pngPhoto"), title: "从相册导入 PNG 角色卡", subtitle: "选择相册或文件中的 PNG", action: "import-character-png" },
+    { icon: icon("textPaste"), title: "粘贴文字创建角色", subtitle: "由已配置模型提炼人设字段", action: "create-character-from-text" },
+    { icon: icon("moment"), title: "发布朋友圈", subtitle: "记录一条只在本地保存的动态", action: "create-moment" }
   ]);
 }
 
@@ -3925,7 +4077,7 @@ function openNewChatPicker() {
   }
   openModal({
     title: "选择角色",
-    body: `<div class="menu-list">${state.characters.map((character) => `<button type="button" class="menu-item" data-action="start-chat-with" data-id="${escapeAttr(character.id)}">${renderAvatar(character)}<span><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(character.tag || "新对话")}</small></span><span>›</span></button>`).join("")}</div>`
+    body: `<div class="menu-list">${state.characters.map((character) => `<button type="button" class="menu-item" data-action="start-chat-with" data-id="${escapeAttr(character.id)}">${renderAvatar(character)}<span><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(character.tag || "新对话")}</small></span><span>${icon("chevron")}</span></button>`).join("")}</div>`
   });
 }
 
@@ -4408,7 +4560,7 @@ function openWorldbookForm(worldbookId = null) {
 function renderWorldEntryEditor(entry) {
   return `
     <div class="prompt-item" data-world-entry data-entry-id="${escapeAttr(entry.id)}">
-      <span class="drag-handle">⋮⋮</span>
+      <span class="drag-handle">${icon("drag")}</span>
       <div>
         <div class="form-grid">
           <div class="field"><label>备注名</label><input name="entryComment" value="${escapeAttr(entry.comment)}"></div>
@@ -4428,7 +4580,7 @@ function renderWorldEntryEditor(entry) {
           <div class="field full check-row"><span>停用<small>SillyTavern 原字段为 disable</small></span><span class="switch"><input type="checkbox" name="entryDisable" ${entry.disable ? "checked" : ""}><i></i></span></div>
         </div>
       </div>
-      <button type="button" class="icon-btn danger" data-action="remove-world-entry">×</button>
+      <button type="button" class="icon-btn danger" data-action="remove-world-entry">${icon("close")}</button>
     </div>`;
 }
 
@@ -4551,7 +4703,7 @@ function openPresetForm(presetId = null) {
 function renderPresetPrompt(prompt) {
   return `
     <div class="prompt-item" draggable="true" data-preset-prompt data-identifier="${escapeAttr(prompt.identifier)}">
-      <span class="drag-handle">⋮⋮</span>
+      <span class="drag-handle">${icon("drag")}</span>
       <div>
         <div class="form-grid">
           <div class="field"><label>标识符</label><input name="promptIdentifier" value="${escapeAttr(prompt.identifier)}"></div>
@@ -4565,7 +4717,7 @@ function renderPresetPrompt(prompt) {
           <div class="field check-row"><span>系统提示</span><span class="switch"><input type="checkbox" name="promptSystem" ${prompt.system_prompt ? "checked" : ""}><i></i></span></div>
         </div>
       </div>
-      <button type="button" class="icon-btn danger" data-action="remove-preset-prompt">×</button>
+      <button type="button" class="icon-btn danger" data-action="remove-preset-prompt">${icon("close")}</button>
     </div>`;
 }
 
@@ -4686,14 +4838,14 @@ function openQuickReplyForm(id = null) {
 function renderQuickButton(item) {
   return `
     <div class="prompt-item" data-quick-button>
-      <span class="drag-handle">⌘</span>
+      <span class="drag-handle">${icon("drag")}</span>
       <div class="form-grid">
         <div class="field"><label>按钮名</label><input name="qrLabel" value="${escapeAttr(item.label)}"></div>
         <div class="field"><label>内容</label><input name="qrMessage" value="${escapeAttr(item.message)}"></div>
         <div class="field check-row"><span>显示标签</span><span class="switch"><input type="checkbox" name="qrShowLabel" ${item.showLabel ? "checked" : ""}><i></i></span></div>
         <div class="field check-row"><span>隐藏按钮</span><span class="switch"><input type="checkbox" name="qrHidden" ${item.isHidden ? "checked" : ""}><i></i></span></div>
       </div>
-      <button type="button" class="icon-btn danger" data-action="remove-quick-button">×</button>
+      <button type="button" class="icon-btn danger" data-action="remove-quick-button">${icon("close")}</button>
     </div>`;
 }
 
@@ -4722,7 +4874,7 @@ function renderApiManagerBody() {
           <button type="button" class="btn small" data-action="set-default-api" data-id="${escapeAttr(config.id)}">设为默认</button>
           <button type="button" class="btn small danger" data-action="delete-api" data-id="${escapeAttr(config.id)}">删除</button>
         </div>
-      </article>`).join("") : `<div class="empty-state" style="min-height:220px;padding:20px"><div class="empty-illustration">⇄</div><h2>还没有 ${state.apiTab === "text" ? "文字" : state.apiTab === "image" ? "图片" : "视频"}接口</h2><p>选择下方默认模板开始，所有 URL、请求体和解析路径均可修改。</p></div>`}
+      </article>`).join("") : `<div class="empty-state" style="min-height:220px;padding:20px"><div class="empty-illustration">${icon("api")}</div><h2>还没有 ${state.apiTab === "text" ? "文字" : state.apiTab === "image" ? "图片" : "视频"}接口</h2><p>选择下方默认模板开始，所有 URL、请求体和解析路径均可修改。</p></div>`}
     <div class="surface" style="margin-top:14px">
       <div class="surface-title"><strong>默认模板</strong><span>点击后创建独立配置，不会提交请求</span></div>
       <div class="menu-list">
@@ -4934,7 +5086,7 @@ function openNotifications() {
         <span>${escapeHtml(item.text || "")}</span>
         <span>${formatRelativeTime(item.createdAt)}</span>
         ${item.chatId ? `<div class="card-actions"><button type="button" class="btn small" data-action="open-notification-chat" data-chat-id="${escapeAttr(item.chatId)}">打开聊天</button></div>` : ""}
-      </article>`).join("") : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">◉</div><h2>没有通知</h2><p>角色主动消息和本地日程提醒会出现在这里。</p></div>`,
+      </article>`).join("") : `<div class="empty-state" style="min-height:260px"><div class="empty-illustration">${icon("notification")}</div><h2>没有通知</h2><p>角色主动消息和本地日程提醒会出现在这里。</p></div>`,
     actions: [
       { id: "clear", label: "清空", danger: true, handler: async () => { state.settings.notifications = []; await saveSettings(); renderScreen(); } },
       { id: "close", label: "关闭", primary: true, handler: async () => { state.settings.notifications = state.settings.notifications.map((item) => ({ ...item, read: true })); await saveSettings(); renderScreen(); } }
@@ -4952,13 +5104,13 @@ function openSchedules() {
       <div class="surface-title"><strong>提醒</strong><button type="button" class="btn small primary" data-action="add-schedule">+ 添加</button></div>
       <div id="scheduleList">${schedules.length ? schedules.map((item) => `
         <div class="prompt-item" data-schedule data-id="${escapeAttr(item.id)}">
-          <span class="drag-handle">◷</span>
+          <span class="drag-handle">${icon("drag")}</span>
           <div><div class="form-grid">
             <div class="field"><label>名称</label><input name="scheduleTitle" value="${escapeAttr(item.title)}"></div>
             <div class="field"><label>时间</label><input type="datetime-local" name="scheduleTime" value="${escapeAttr(item.time)}"></div>
             <div class="field full"><label>备注</label><input name="scheduleNote" value="${escapeAttr(item.note || "")}"></div>
           </div></div>
-          <button type="button" class="icon-btn danger" data-action="remove-schedule">×</button>
+          <button type="button" class="icon-btn danger" data-action="remove-schedule">${icon("close")}</button>
         </div>`).join("") : `<div class="entry-preview">暂无日程。</div>`}</div>
     `,
     actions: [
@@ -5090,7 +5242,7 @@ function openMoments() {
           <span>${escapeHtml(item.text)}</span>
           <span>${formatRelativeTime(item.createdAt)} · ${(item.likes || []).length} 个赞 · ${(item.comments || []).length} 条评论</span>
           <div class="card-actions"><button type="button" class="btn small" data-action="like-moment" data-id="${escapeAttr(item.id)}">赞</button><button type="button" class="btn small" data-action="comment-moment" data-id="${escapeAttr(item.id)}">评论</button><button type="button" class="btn small danger" data-action="delete-moment" data-id="${escapeAttr(item.id)}">删除</button></div>
-        </article>`).join("") : `<div class="empty-state" style="min-height:240px;padding:18px"><div class="empty-illustration">◎</div><h2>还没有动态</h2><p>动态只保存在本机，也可以让角色看到后自然回应。</p></div>`}</div>
+        </article>`).join("") : `<div class="empty-state" style="min-height:240px;padding:18px"><div class="empty-illustration">${icon("moment")}</div><h2>还没有动态</h2><p>动态只保存在本机，也可以让角色看到后自然回应。</p></div>`}</div>
     `
   });
 }
@@ -5386,45 +5538,45 @@ function openChatMenu() {
   const chat = state.currentChat;
   assert(chat, "聊天不存在");
   openSheet("聊天设置", [
-    { icon: "☎", title: "语音通话", subtitle: "使用麦克风和角色语音", action: "start-voice-call" },
-    { icon: "▣", title: "视频通话", subtitle: "摄像头预览与生成画面", action: "start-video-call" },
-    { icon: "▧", title: "从相册发送图片", subtitle: "选择本机图片发送", action: "send-photo" },
-    { icon: "▶", title: "从相册发送视频", subtitle: "选择本机视频发送", action: "send-video" },
-    { icon: "☺", title: "发送表情", subtitle: "Emoji 表情消息", action: "send-emoji" },
-    { icon: "⌖", title: "分享位置", subtitle: "发送“我在这里”位置卡片", action: "send-location" },
-    { icon: "¥", title: "发红包", subtitle: "本地娱乐钱包，不连接真实支付", action: "send-transfer" },
-    { icon: "✦", title: "互动问答", subtitle: "真心话、五五开、记忆考验", action: "open-interactions" },
-    { icon: "☾", title: "哄睡模式", subtitle: "白噪音与角色轻声朗读", action: "open-sleep-mode" },
-    { icon: "⌕", title: "搜索消息", subtitle: "在本地聊天记录中查找", action: "search-chat" },
-    { icon: "✎", title: "编辑聊天标题", subtitle: chat.title, action: "rename-chat" },
-    { icon: "⌖", title: chat.pinned ? "取消置顶" : "置顶聊天", subtitle: "调整首页排序", action: "toggle-pin-chat" },
-    { icon: chat.muted ? "◉" : "○", title: chat.muted ? "取消静音" : "静音聊天", subtitle: "停止未读提示", action: "toggle-mute-chat" },
-    { icon: "▦", title: "聊天摘要", subtitle: chat.summary ? "查看或重建摘要" : "压缩较早对话", action: "manage-summary" },
-    { icon: "✦", title: "这一刻值得记住", subtitle: "把最近的消息保存成纪念卡", action: "create-memory" },
-    { icon: "⌁", title: "生成图片", subtitle: "使用已配置的图片接口", action: "generate-image" },
-    { icon: "▶", title: "生成视频", subtitle: "使用已配置的视频接口", action: "generate-video" },
-    { icon: "▣", title: "系统附加提示", subtitle: "只影响当前聊天", action: "edit-chat-extra" },
-    { icon: "×", title: "删除聊天", subtitle: "同时删除该窗口全部消息", danger: true, action: "delete-chat" }
+    { icon: icon("phoneCall"), title: "语音通话", subtitle: "使用麦克风和角色语音", action: "start-voice-call" },
+    { icon: icon("videoCall"), title: "视频通话", subtitle: "摄像头预览与生成画面", action: "start-video-call" },
+    { icon: icon("pngPhoto"), title: "从相册发送图片", subtitle: "选择本机图片发送", action: "send-photo" },
+    { icon: icon("film"), title: "从相册发送视频", subtitle: "选择本机视频发送", action: "send-video" },
+    { icon: icon("emoji"), title: "发送表情", subtitle: "Emoji 表情消息", action: "send-emoji" },
+    { icon: icon("location"), title: "分享位置", subtitle: "发送“我在这里”位置卡片", action: "send-location" },
+    { icon: icon("transferMoney"), title: "发红包", subtitle: "本地娱乐钱包，不连接真实支付", action: "send-transfer" },
+    { icon: icon("question"), title: "互动问答", subtitle: "真心话、五五开、记忆考验", action: "open-interactions" },
+    { icon: icon("moon"), title: "哄睡模式", subtitle: "白噪音与角色轻声朗读", action: "open-sleep-mode" },
+    { icon: icon("search"), title: "搜索消息", subtitle: "在本地聊天记录中查找", action: "search-chat" },
+    { icon: icon("edit"), title: "编辑聊天标题", subtitle: chat.title, action: "rename-chat" },
+    { icon: icon("pin"), title: chat.pinned ? "取消置顶" : "置顶聊天", subtitle: "调整首页排序", action: "toggle-pin-chat" },
+    { icon: icon(chat.muted ? "volumeOff" : "volumeOn"), title: chat.muted ? "取消静音" : "静音聊天", subtitle: "停止未读提示", action: "toggle-mute-chat" },
+    { icon: icon("summary"), title: "聊天摘要", subtitle: chat.summary ? "查看或重建摘要" : "压缩较早对话", action: "manage-summary" },
+    { icon: icon("memory"), title: "这一刻值得记住", subtitle: "把最近的消息保存成纪念卡", action: "create-memory" },
+    { icon: icon("imageGen"), title: "生成图片", subtitle: "使用已配置的图片接口", action: "generate-image" },
+    { icon: icon("videoGen"), title: "生成视频", subtitle: "使用已配置的视频接口", action: "generate-video" },
+    { icon: icon("textModel"), title: "系统附加提示", subtitle: "只影响当前聊天", action: "edit-chat-extra" },
+    { icon: icon("trash"), title: "删除聊天", subtitle: "同时删除该窗口全部消息", danger: true, action: "delete-chat" }
   ]);
 }
 
 function openChatMore() {
   openSheet("更多", [
-    { icon: "▧", title: "从相册发送图片", subtitle: "相册图片会压缩后保存在本机", action: "send-photo" },
-    { icon: "▶", title: "从相册发送视频", subtitle: "选择手机或电脑中的视频", action: "send-video" },
-    { icon: "☺", title: "发送表情", subtitle: "发送一个表情反应", action: "send-emoji" },
-    { icon: "⌖", title: "分享位置", subtitle: "发送位置卡片", action: "send-location" },
-    { icon: "¥", title: "发红包", subtitle: "本地娱乐红包", action: "send-transfer" },
-    { icon: "✦", title: "互动问答", subtitle: "进入角色引导的小互动", action: "open-interactions" },
-    { icon: "☾", title: "哄睡模式", subtitle: "白噪音与轻声朗读", action: "open-sleep-mode" },
-    { icon: "▧", title: "生成图片", subtitle: "向图片模型描述画面", action: "generate-image" },
-    { icon: "▶", title: "生成视频", subtitle: "向视频模型描述镜头", action: "generate-video" },
-    { icon: "☎", title: "语音通话", subtitle: "麦克风识别、角色语音回复", action: "start-voice-call" },
-    { icon: "▣", title: "视频通话", subtitle: "摄像头预览与模型生成画面", action: "start-video-call" },
-    { icon: "⌕", title: "搜索消息", subtitle: "本地全文检索", action: "search-chat" },
-    { icon: "▦", title: "摘要与记忆", subtitle: "压缩旧对话", action: "manage-summary" },
-    { icon: "⌘", title: "快捷回复管理", subtitle: "配置输入栏按钮", action: "manage-quick-replies" }
-    ,{ icon: "✦", title: "这一刻值得记住", subtitle: "保存为纪念卡", action: "create-memory" }
+    { icon: icon("pngPhoto"), title: "从相册发送图片", subtitle: "相册图片会压缩后保存在本机", action: "send-photo" },
+    { icon: icon("film"), title: "从相册发送视频", subtitle: "选择手机或电脑中的视频", action: "send-video" },
+    { icon: icon("emoji"), title: "发送表情", subtitle: "发送一个表情反应", action: "send-emoji" },
+    { icon: icon("location"), title: "分享位置", subtitle: "发送位置卡片", action: "send-location" },
+    { icon: icon("transferMoney"), title: "发红包", subtitle: "本地娱乐红包", action: "send-transfer" },
+    { icon: icon("question"), title: "互动问答", subtitle: "进入角色引导的小互动", action: "open-interactions" },
+    { icon: icon("moon"), title: "哄睡模式", subtitle: "白噪音与轻声朗读", action: "open-sleep-mode" },
+    { icon: icon("imageGen"), title: "生成图片", subtitle: "向图片模型描述画面", action: "generate-image" },
+    { icon: icon("videoGen"), title: "生成视频", subtitle: "向视频模型描述镜头", action: "generate-video" },
+    { icon: icon("phoneCall"), title: "语音通话", subtitle: "麦克风识别、角色语音回复", action: "start-voice-call" },
+    { icon: icon("videoCall"), title: "视频通话", subtitle: "摄像头预览与模型生成画面", action: "start-video-call" },
+    { icon: icon("search"), title: "搜索消息", subtitle: "本地全文检索", action: "search-chat" },
+    { icon: icon("summary"), title: "摘要与记忆", subtitle: "压缩旧对话", action: "manage-summary" },
+    { icon: icon("quick"), title: "快捷回复管理", subtitle: "配置输入栏按钮", action: "manage-quick-replies" }
+    ,{ icon: icon("memory"), title: "这一刻值得记住", subtitle: "保存为纪念卡", action: "create-memory" }
   ]);
 }
 
@@ -5910,13 +6062,13 @@ function renderCallOverlay() {
     <div id="callSubtitle" class="call-subtitle">正在聆听…</div>
     <form class="call-text-form" data-call-text-form>
       <input name="callText" placeholder="${isVideo ? "输入台词或生成画面描述" : "无法语音识别时，可在这里输入"}">
-      <button type="submit" title="发送">➤</button>
+      <button type="submit" title="发送">${icon("send")}</button>
     </form>
     <div class="call-controls">
-      <button class="call-control ${state.call.muted ? "active" : ""}" data-action="toggle-call-mute" title="静音">${state.call.muted ? "×" : "◉"}</button>
-      ${isVideo ? `<button class="call-control ${state.call.cameraEnabled ? "active" : ""}" data-action="toggle-call-camera" title="摄像头">▣</button>` : ""}
-      <button class="call-control generate" data-action="generate-call-scene" title="生成一幕">✦</button>
-      <button class="call-control end" data-action="end-call" title="挂断">✕</button>
+      <button class="call-control ${state.call.muted ? "active" : ""}" data-action="toggle-call-mute" title="静音">${icon(state.call.muted ? "micOff" : "mic")}</button>
+      ${isVideo ? `<button class="call-control ${state.call.cameraEnabled ? "active" : ""}" data-action="toggle-call-camera" title="摄像头">${icon("camera")}</button>` : ""}
+      <button class="call-control generate" data-action="generate-call-scene" title="生成一幕">${icon("spark")}</button>
+      <button class="call-control end" data-action="end-call" title="挂断">${icon("phoneOff")}</button>
     </div>
   `;
   attachCallStream();
@@ -6222,9 +6374,9 @@ function stopSleepMode(showToast = true) {
 
 function openInteractionMenu() {
   openSheet("互动问答", [
-    { icon: "?", title: "真心话", subtitle: "角色向你提出一个只属于你们的问题", action: "start-interaction", id: "truth" },
-    { icon: "½", title: "五五开", subtitle: "两个选项，角色根据你的选择回应", action: "start-interaction", id: "choice" },
-    { icon: "⌘", title: "记忆考验", subtitle: "角色问你一个关于过往对话的问题", action: "start-interaction", id: "memory" }
+    { icon: icon("question"), title: "真心话", subtitle: "角色向你提出一个只属于你们的问题", action: "start-interaction", id: "truth" },
+    { icon: icon("balance"), title: "五五开", subtitle: "两个选项，角色根据你的选择回应", action: "start-interaction", id: "choice" },
+    { icon: icon("memory"), title: "记忆考验", subtitle: "角色问你一个关于过往对话的问题", action: "start-interaction", id: "memory" }
   ]);
 }
 
@@ -6440,7 +6592,7 @@ async function handleDocumentClick(event) {
     else if (action === "open-schedules") openSchedules();
     else if (action === "add-schedule") {
       const list = $("#scheduleList");
-      if (list) list.innerHTML += `<div class="prompt-item" data-schedule data-id="${uid()}"><span class="drag-handle">◷</span><div><div class="form-grid"><div class="field"><label>名称</label><input name="scheduleTitle"></div><div class="field"><label>时间</label><input type="datetime-local" name="scheduleTime"></div><div class="field full"><label>备注</label><input name="scheduleNote"></div></div></div><button type="button" class="icon-btn danger" data-action="remove-schedule">×</button></div>`;
+      if (list) list.innerHTML += `<div class="prompt-item" data-schedule data-id="${uid()}"><span class="drag-handle">${icon("drag")}</span><div><div class="form-grid"><div class="field"><label>名称</label><input name="scheduleTitle"></div><div class="field"><label>时间</label><input type="datetime-local" name="scheduleTime"></div><div class="field full"><label>备注</label><input name="scheduleNote"></div></div></div><button type="button" class="icon-btn danger" data-action="remove-schedule">${icon("close")}</button></div>`;
     }
     else if (action === "remove-schedule") target.closest("[data-schedule]")?.remove();
     else if (action === "open-notification-chat") {

@@ -598,6 +598,15 @@ textarea {
 .chat-avatar {
   width: 46px;
   height: 46px;
+  overflow: hidden;
+  line-height: 1;
+  text-align: center;
+}
+
+/* 群聊头像同时显示两位成员的首字，需要更小的字号才放得下 */
+.chat-avatar.stack-two {
+  font-size: 14px;
+  letter-spacing: -.02em;
 }
 
 .avatar {
@@ -2610,84 +2619,406 @@ textarea {
   --shadow-bubble: 0 1px 2px rgba(0,0,0,.04);
 }
 
-/* 角色主题：夏鸣星 · 暖橙 */
+/* ==========================================================================
+   五个角色主题 · 独立视觉语言
+   每套主题拥有：专属字体栈 / 圆角逻辑 / 材质阴影 / 背景装饰层 / 符号语汇
+   六个基础主题不受影响。
+   ========================================================================== */
+
+/* 角色主题：夏鸣星 · 暖橙 —— 「橘子汽水与六出花」
+   视觉命题：夏日气泡的轻盈 + 音乐剧舞台的光斑 + 白切黑的暗涌
+   字体：圆润人文无衬线，字距略松，像舞台报幕
+   圆角：大圆角（汽水气泡感）；阴影极轻（漂浮感） */
 [data-theme="xiamingxing"] {
-  --bg:#fff8f0;--bg2:#fff0e0;
-  --panel:#fff5ec;--panel2:#fff9f4;--pop:#ffe7cf;
-  --line:#f0dcc8;--line2:#e0c8b0;
-  --fg:#4a3528;--dim:#a0846c;--faint:#c8b498;
-  --acc:#e6a372;--acc2:#f0c8a0;
-  --ok:#6dbb88;--warn:#e2a63c;--err:#e5564b;
-  --me:linear-gradient(135deg,#f0c8a0,#e6a372);--me-fg:#fff;
+  --bg:#fff8f0;--bg2:#ffefdd;
+  --panel:#fff6ee;--panel2:#fffaF5;--pop:#ffe3c6;
+  --line:#f3ddc6;--line2:#e4c9aa;
+  --fg:#4a3428;--dim:#9c7f66;--faint:#c9b39a;
+  --acc:#e6a372;--acc2:#f2c9a2;
+  /* 暗涌色：白切黑的那一层，用在强调描边与深层投影 */
+  --deep:#8a4f2c;
+  --ok:#6cbb8a;--warn:#e2a63c;--err:#e5564b;
+  --me:linear-gradient(135deg,#f4cba4,#e6a372);--me-fg:#fff;
   --bubble:#fff;
-  --radius:24px;--radius-bubble:16px;
-  --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
-  --shadow:0 24px 54px -30px rgba(190,116,56,.30);
-  --shadow-bubble:0 5px 16px -13px rgba(190,116,56,.45);
+  --radius:26px;--radius-bubble:17px;
+  /* 字体：圆体（音乐剧的明亮、少年感的圆润收笔） */
+  --font:"HarmonyOS Sans SC","MiSans","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --letter:.012em;
+  --shadow:0 22px 50px -30px rgba(186,112,54,.30);
+  --shadow-bubble:0 5px 16px -13px rgba(186,112,54,.42);
+  /* 背景装饰层：汽水气泡 + 舞台柔光 */
+  --deco-a:radial-gradient(circle 3px at 12% 18%, color-mix(in srgb,var(--acc) 55%,transparent), transparent 60%);
+  --deco-b:radial-gradient(circle 2px at 78% 34%, color-mix(in srgb,var(--acc2) 70%,transparent), transparent 60%);
+  --deco-c:radial-gradient(circle 4px at 62% 82%, color-mix(in srgb,var(--acc) 38%,transparent), transparent 60%);
+  --deco-d:radial-gradient(120% 70% at 82% -8%, color-mix(in srgb,var(--acc) 20%,transparent), transparent 62%);
+  --me-tint:linear-gradient(135deg, color-mix(in srgb,var(--acc) 9%,transparent), transparent 60%);
 }
 
-/* 角色主题：左然 · 酒红 */
+/* 角色主题：左然 · 酒红 —— 「白梅与天平」
+   视觉命题：法度、克制的理性秩序 + 白梅的清冷 + 一点知性的书卷气
+   字体：衬线体（法典与卷宗）；字距收紧，一丝不苟
+   圆角：小圆角近直角（直线、准则、卡尺）；阴影干净利落 */
 [data-theme="zuoran"] {
-  --bg:#faf7f5;--bg2:#f5eee8;
-  --panel:#fdfaf8;--panel2:#f8f2ee;--pop:#f0e0dc;
-  --line:#e0d0c8;--line2:#c8b0a8;
-  --fg:#3a2a28;--dim:#8a6a68;--faint:#b09898;
-  --acc:#b14444;--acc2:#c96a6a;
+  --bg:#faf7f5;--bg2:#f4ebe5;
+  --panel:#fdfbf9;--panel2:#f7f1ec;--pop:#ecddd6;
+  --line:#e2d2c9;--line2:#c6ab9f;
+  --fg:#382724;--dim:#84655f;--faint:#ae9490;
+  --acc:#b14444;--acc2:#d08989;
+  /* 天平金：用于刻度线、分隔与徽记细节，最克制的一点暖 */
+  --deep:#2e2020;--metal:#a98a52;
   --ok:#5f9d72;--warn:#e2a63c;--err:#b84444;
-  --me:#b14444;--me-fg:#fff;
+  --me:linear-gradient(135deg,#b14444,#8f3232);--me-fg:#fff;
   --bubble:#fff;
-  --radius:12px;--radius-bubble:8px;
-  --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
-  --shadow:0 12px 34px -26px rgba(90,45,42,.25);
-  --shadow-bubble:0 3px 12px -10px rgba(90,45,42,.32);
+  --radius:9px;--radius-bubble:5px;
+  --font:"Source Han Serif SC","Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --letter:.004em;
+  --shadow:0 10px 30px -26px rgba(74,34,32,.30);
+  --shadow-bubble:0 2px 9px -8px rgba(74,34,32,.30);
+  /* 背景装饰层：极淡的格纸 + 一枚梅枝影 */
+  --deco-a:repeating-linear-gradient(0deg, color-mix(in srgb,var(--line2) 16%,transparent) 0 1px, transparent 1px 26px);
+  --deco-b:radial-gradient(circle 2px at 88% 12%, color-mix(in srgb,var(--acc) 26%,transparent), transparent 62%);
+  --deco-c:radial-gradient(90% 60% at 4% 96%, color-mix(in srgb,var(--metal) 14%,transparent), transparent 66%);
+  --deco-d:none;
+  --me-tint:none;
 }
 
-/* 角色主题：沈星回 · 星河紫 */
+/* 角色主题：沈星回 · 星河紫 —— 「星辰与光」
+   视觉命题：深空、王子与圣剑 + 安静到近乎危险的通透
+   字体：无衬线，字距微开（呼吸感、星空的疏阔）
+   圆角：中等圆角；阴影带光的辉散（nebula glow）
+   注意：这是深色主题，文字对比度必须充足 */
 [data-theme="shenxinghui"] {
-  --bg:#12101a;--bg2:#1a1628;
-  --panel:#1e1a30;--panel2:#262040;--pop:#302852;
-  --line:#3a3050;--line2:#504070;
-  --fg:#e8e0f8;--dim:#9a8ab8;--faint:#6a5a88;
-  --acc:#a78bfa;--acc2:#8b6cf0;
+  --bg:#0f0d1b;--bg2:#161229;
+  --panel:#1b1630;--panel2:#221b3d;--pop:#2c2350;
+  --line:#332a55;--line2:#4a3d78;
+  --fg:#ece5fb;--dim:#a294c4;--faint:#6f5f96;
+  --acc:#a78bfa;--acc2:#7d5cf0;
+  /* 星芒蓝白：圣剑与光 Evol 的高光色 */
+  --deep:#0a0814;--glow:#cfe0ff;
   --ok:#6ee7b7;--warn:#e2a63c;--err:#ff5c7a;
-  --me:linear-gradient(135deg,#8b6cf0,#a78bfa);--me-fg:#fff;
-  --bubble:#2a2440;
-  --radius:16px;--radius-bubble:14px;
-  --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
-  --shadow:0 28px 64px -30px rgba(83,52,170,.72);
-  --shadow-bubble:0 6px 20px -14px rgba(139,108,240,.70);
+  --me:linear-gradient(135deg,#7d5cf0,#a78bfa);--me-fg:#fff;
+  --bubble:#241d42;
+  --radius:15px;--radius-bubble:13px;
+  /* 字体：等宽技术感（观测者、星图与代码的冷静理性），与圆润的夏鸣星明确区分 */
+  --font:"JetBrains Mono","Cascadia Mono","DejaVu Sans Mono","Consolas","MiSans","PingFang SC",monospace;
+  --letter:.03em;
+  --shadow:0 26px 60px -30px rgba(70,44,160,.78);
+  --shadow-bubble:0 5px 20px -14px rgba(140,110,250,.66);
+  /* 背景装饰层：星野 + 银河辉光 + 高亮星芒 */
+  --deco-a:radial-gradient(circle 1.5px at 22% 14%, var(--glow), transparent 62%);
+  --deco-b:radial-gradient(circle 1px at 74% 26%, color-mix(in srgb,var(--glow) 80%,transparent), transparent 60%);
+  --deco-c:radial-gradient(circle 2px at 46% 72%, color-mix(in srgb,var(--acc) 85%,transparent), transparent 62%);
+  --deco-d:radial-gradient(90% 60% at 84% 4%, color-mix(in srgb,var(--acc2) 26%,transparent), transparent 64%);
+  --me-tint:linear-gradient(135deg, color-mix(in srgb,var(--acc) 12%,transparent), transparent 62%);
 }
 
-/* 角色主题：易遇 · 咖啡 */
+/* 角色主题：易遇 · 灰咖 —— 「雨与钢笔」
+   视觉命题：铅灰的通透清冷 + 金融精英的料子质感 + 永远在下雨的世界
+   字体：无衬线 + 明显的字距（从容、留白、客气而疏离）
+   圆角：极小圆角（锋利、克制、西装直角）
+   深色补充：与夏鸣星暖橙、左然酒红形成明确的第三方位——中性偏冷 */
 [data-theme="yiyu"] {
-  --bg:#faf6f0;--bg2:#f2e8dc;
-  --panel:#fdfaf6;--panel2:#f7f0e6;--pop:#eadcc8;
-  --line:#e0d0bc;--line2:#c8b094;
-  --fg:#2c1e12;--dim:#7a5c3c;--faint:#a88a68;
-  --acc:#6b4a2f;--acc2:#a67c52;
+  --bg:#f4f3f1;--bg2:#e9e7e3;
+  --panel:#fbfaf9;--panel2:#f2f0ed;--pop:#e2ded7;
+  --line:#dbd7d0;--line2:#bdb7ad;
+  --fg:#2b2721;--dim:#6f6a61;--faint:#9d978c;
+  --acc:#5f564b;--acc2:#8d8375;
+  /* 皮革棕：玉坠平安锁与深棕皮革的暖点，只做极小面积点缀 */
+  --deep:#211d18;--leather:#7a5a3c;--ink:#1c1a16;
   --ok:#6f9a69;--warn:#e2a63c;--err:#a94e3c;
-  --me:linear-gradient(135deg,#a67c52,#6b4a2f);--me-fg:#fff;
+  --me:linear-gradient(135deg,#6b6155,#413b33);--me-fg:#fff;
   --bubble:#fff;
-  --radius:10px;--radius-bubble:7px;
-  --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
-  --shadow:0 14px 38px -30px rgba(72,48,28,.34);
-  --shadow-bubble:0 3px 12px -10px rgba(72,48,28,.38);
+  --radius:7px;--radius-bubble:5px;
+  /* 字体：楷体（书法与钢笔的笔锋感、文人书卷气），与其余四者拉开明显距离 */
+  --font:"Kaiti SC","STKaiti","KaiTi","楷体","Songti SC","SimSun",serif;
+  --letter:.05em;
+  --shadow:0 12px 34px -30px rgba(40,36,30,.40);
+  --shadow-bubble:0 2px 10px -9px rgba(40,36,30,.42);
+  /* 背景装饰层：斜向雨丝（极淡）+ 一点冷光 */
+  --deco-a:repeating-linear-gradient(112deg, color-mix(in srgb,var(--line2) 13%,transparent) 0 1px, transparent 1px 15px);
+  --deco-b:radial-gradient(120% 80% at 92% -10%, color-mix(in srgb,var(--acc) 10%,transparent), transparent 62%);
+  --deco-c:none;--deco-d:none;
+  --me-tint:none;
 }
 
-/* 角色主题：白起 · 红黑 */
+/* 角色主题：白起 · 红黑 —— 「风与银杏雨」
+   视觉命题：凌厉、危险、高对比 + 十六岁那场银杏雨的灼热温柔
+   字体：无衬线，字重更沉，字距收紧（攻击性、冲劲）
+   圆角：锐利小圆角；硬边高对比阴影；无柔化
+   深色主题：文字对比度必须充足 */
 [data-theme="baiqi"] {
-  --bg:#0e0c0c;--bg2:#161212;
-  --panel:#1a1616;--panel2:#241e1e;--pop:#302626;
-  --line:#3a2828;--line2:#503838;
-  --fg:#f0e8e8;--dim:#a89090;--faint:#785858;
-  --acc:#c8322a;--acc2:#e05a50;
+  --bg:#0d0b0b;--bg2:#151111;
+  --panel:#191515;--panel2:#221c1c;--pop:#2e2424;
+  --line:#392626;--line2:#553434;
+  --fg:#f4ecec;--dim:#b09494;--faint:#7d5b5b;
+  --acc:#cc3229;--acc2:#e86055;
+  /* 银杏黄：象征物银杏叶，作为高对比的第三色，极少量用于徽记与强调 */
+  --deep:#0a0808;--ginkgo:#e8b552;
   --ok:#58b77a;--warn:#e2a63c;--err:#ff4d4d;
-  --me:#c8322a;--me-fg:#fff;
-  --bubble:#2a2222;
-  --radius:8px;--radius-bubble:6px;
-  --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
-  --shadow:0 28px 62px -30px rgba(125,20,17,.72);
-  --shadow-bubble:0 5px 18px -14px rgba(200,50,42,.62);
+  --me:linear-gradient(135deg,#cc3229,#8f1f19);--me-fg:#fff;
+  --bubble:#271f1f;
+  --radius:6px;--radius-bubble:4px;
+  /* 字体：窄体/压缩无衬线 + 负字距（锋利、肃杀、行动力），与夏鸣星的圆润正相反 */
+  --font:"Roboto Condensed","Arial Narrow","DejaVu Sans Condensed","HarmonyOS Sans SC","MiSans","PingFang SC",sans-serif;
+  --letter:-.01em;
+  --shadow:0 26px 58px -30px rgba(150,26,20,.80);
+  --shadow-bubble:0 4px 18px -14px rgba(204,50,41,.60);
+  /* 背景装饰层：斜切风痕 + 银杏叶落影 + 炽红辉光 */
+  --deco-a:repeating-linear-gradient(102deg, color-mix(in srgb,var(--acc) 9%,transparent) 0 1px, transparent 1px 30px);
+  --deco-b:radial-gradient(60% 40% at 96% 2%, color-mix(in srgb,var(--acc) 20%,transparent), transparent 66%);
+  --deco-c:radial-gradient(circle 2px at 18% 78%, color-mix(in srgb,var(--ginkgo) 42%,transparent), transparent 62%);
+  --deco-d:radial-gradient(circle 3px at 66% 60%, color-mix(in srgb,var(--acc) 24%,transparent), transparent 64%);
+  --me-tint:linear-gradient(135deg, color-mix(in srgb,var(--acc) 12%,transparent), transparent 64%);
+}
+
+/* ---------- 角色主题背景装饰层（仅五个角色主题生效） ---------- */
+/* 用 body 的固定伪元素叠加装饰，避免影响任何布局与滚动 */
+body::before {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0;
+  transition: opacity .35s ease;
+}
+
+html:has(body[data-theme="xiamingxing"]) body::before,
+html:has(body[data-theme="zuoran"]) body::before,
+html:has(body[data-theme="shenxinghui"]) body::before,
+html:has(body[data-theme="yiyu"]) body::before,
+html:has(body[data-theme="baiqi"]) body::before {
+  opacity: 1;
+  background-image: var(--deco-a), var(--deco-b), var(--deco-c), var(--deco-d);
+}
+
+/* 沉浸主题：手机屏幕内部也铺一层很淡的装饰，让"皮肤感"进入机身 */
+.phone-screen::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0;
+  background-image: var(--deco-a), var(--deco-b), var(--deco-c);
+  transition: opacity .35s ease;
+}
+
+html:has(body[data-theme="xiamingxing"]) .phone-screen::before,
+html:has(body[data-theme="zuoran"]) .phone-screen::before,
+html:has(body[data-theme="shenxinghui"]) .phone-screen::before,
+html:has(body[data-theme="yiyu"]) .phone-screen::before,
+html:has(body[data-theme="baiqi"]) .phone-screen::before {
+  opacity: .5;
+}
+
+/* 五个角色主题下的通用质感增强（不改变排版尺寸） */
+[data-theme="xiamingxing"] .theme-rail,
+[data-theme="zuoran"] .theme-rail,
+[data-theme="shenxinghui"] .theme-rail,
+[data-theme="yiyu"] .theme-rail,
+[data-theme="baiqi"] .theme-rail {
+  letter-spacing: var(--letter, 0);
+}
+
+[data-theme="zuoran"] .topbar-title,
+[data-theme="zuoran"] .section-heading strong,
+[data-theme="zuoran"] .surface-title strong {
+  letter-spacing: .01em;
+}
+
+/* 左然：天平刻度线 —— 顶栏下方一条极细的金属刻度 */
+[data-theme="zuoran"] .topbar {
+  border-bottom-color: color-mix(in srgb, var(--metal) 34%, var(--line));
+}
+
+[data-theme="zuoran"] .surface {
+  border-color: color-mix(in srgb, var(--metal) 22%, var(--line));
+}
+
+/* 白起：顶栏一条炽红切边，强化凌厉感 */
+[data-theme="baiqi"] .topbar {
+  border-bottom-color: color-mix(in srgb, var(--acc) 42%, var(--line));
+}
+
+/* 沈星回：气泡带一点星尘辉光边 */
+[data-theme="shenxinghui"] .bubble {
+  border-color: color-mix(in srgb, var(--acc) 24%, var(--line));
+}
+
+/* 夏鸣星：我方气泡保留渐变，但加一层高光，像汽水表面 */
+[data-theme="xiamingxing"] .msg.me .bubble {
+  box-shadow: var(--shadow-bubble), inset 0 1px 0 rgba(255,255,255,.32);
+}
+
+/* ---------- 图标基础样式 ---------- */
+/* 内联 SVG 图标跟随 currentColor，天然适配任何主题 */
+.icon-btn svg,
+.rail-action svg,
+.mini-btn svg,
+.menu-icon svg,
+.dashboard-icon svg,
+.content-resource-icon svg,
+.empty-illustration svg,
+.memory-type svg,
+.bottom-nav button svg {
+  display: block;
+}
+
+.bottom-nav button span > svg {
+  width: 19px;
+  height: 19px;
+}
+
+.rail-action span > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mini-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.menu-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.dashboard-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.content-resource-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.empty-illustration svg {
+  width: 38px;
+  height: 38px;
+  stroke-width: 1.35;
+}
+
+.memory-type svg {
+  width: 15px;
+  height: 15px;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn.primary svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* 底部导航：选中项图标轻微上浮，配合颜色变化 */
+.bottom-nav button.active span > svg {
+  transform: translateY(-1px);
+}
+
+.bottom-nav button span > svg {
+  transition: transform .18s ease;
+}
+
+/* ---------- 主题徽记样式 ---------- */
+.theme-swatch-emblem {
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.theme-swatch-emblem svg {
+  width: 18px;
+  height: 18px;
+}
+
+.theme-emblem {
+  display: block;
+}
+
+/* 主题卡预览：角色主题走"装饰底 + 徽记"的构图 */
+.theme-preview-emblem {
+  position: relative;
+  display: block;
+  grid-template-columns: none;
+  height: 60px;
+  padding: 0;
+}
+
+.theme-preview-emblem-mark {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.theme-preview-emblem-mark svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 1.35;
+}
+
+.theme-preview-chips {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: grid;
+  grid-template-columns: repeat(3, 9px);
+  gap: 3px;
+}
+
+.theme-preview-chips i {
+  display: block;
+  height: 9px;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / .06);
+}
+
+/* 按主题给主题卡预览上色与装饰，让选择器本身也"有皮肤" */
+.theme-card[data-theme-id="xiamingxing"] .theme-preview-emblem {
+  background:
+    radial-gradient(circle 2px at 22% 30%, color-mix(in srgb,#e6a372 55%,transparent), transparent 60%),
+    radial-gradient(circle 3px at 74% 66%, color-mix(in srgb,#f0c8a0 60%,transparent), transparent 62%),
+    linear-gradient(140deg,#fff6ee,#ffe3c6);
+  color: #e6a372;
+}
+
+.theme-card[data-theme-id="zuoran"] .theme-preview-emblem {
+  background:
+    repeating-linear-gradient(0deg, color-mix(in srgb,#c6ab9f 18%,transparent) 0 1px, transparent 1px 13px),
+    linear-gradient(140deg,#fdfbf9,#f0e2db);
+  color: #b14444;
+}
+
+.theme-card[data-theme-id="shenxinghui"] .theme-preview-emblem {
+  background:
+    radial-gradient(circle 1.5px at 26% 28%, #cfe0ff, transparent 62%),
+    radial-gradient(circle 1px at 70% 62%, color-mix(in srgb,#a78bfa 80%,transparent), transparent 60%),
+    radial-gradient(80% 70% at 84% 6%, color-mix(in srgb,#7d5cf0 34%,transparent), transparent 64%),
+    linear-gradient(140deg,#1b1630,#120f22);
+  color: #a78bfa;
+}
+
+.theme-card[data-theme-id="yiyu"] .theme-preview-emblem {
+  background:
+    repeating-linear-gradient(112deg, color-mix(in srgb,#bdb7ad 15%,transparent) 0 1px, transparent 1px 9px),
+    linear-gradient(140deg,#fbfaf9,#e6e3de);
+  color: #5f564b;
+}
+
+.theme-card[data-theme-id="baiqi"] .theme-preview-emblem {
+  background:
+    repeating-linear-gradient(102deg, color-mix(in srgb,#cc3229 12%,transparent) 0 1px, transparent 1px 16px),
+    radial-gradient(60% 50% at 92% 4%, color-mix(in srgb,#cc3229 26%,transparent), transparent 66%),
+    radial-gradient(circle 2px at 20% 76%, color-mix(in srgb,#e8b552 45%,transparent), transparent 62%),
+    linear-gradient(140deg,#191515,#0d0b0b);
+  color: #e86055;
 }
 
 @media (max-width: 820px) {
@@ -2844,4 +3175,141 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+}
+
+/* ==========================================================================
+   图标补齐与聊天区降噪
+   --------------------------------------------------------------------------
+   1. 上一轮的内联 SVG 图标替换只覆盖了一部分位置，聊天页、设置页与通话浮层
+      仍然混着 ◉ ☎ ▣ ➤ ＋ × 等裸符号。这些字符的字重、基线与 SVG 描边不一致，
+      在同一排按钮里尤其明显。下面补齐所有新接入图标的尺寸规则。
+   2. 每条消息原本常驻一整排操作按钮（引用/复制/朗读/配图/短片/表情/重 roll/
+      编辑/删除）。手机上这排文字会盖过对话本身。长按气泡已经会弹出同一个
+      操作面板，所以这里默认收起，只在桌面端悬停时以浮层形式出现。
+   ========================================================================== */
+
+/* ---------- 新接入图标的统一尺寸 ---------- */
+.composer-btn svg,
+.send-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.send-btn svg {
+  width: 19px;
+  height: 19px;
+}
+
+.pin-mark svg {
+  width: 11px;
+  height: 11px;
+}
+
+.voice-play svg {
+  width: 15px;
+  height: 15px;
+}
+
+.spark svg {
+  width: 12px;
+  height: 12px;
+}
+
+.location-map svg {
+  width: 18px;
+  height: 18px;
+}
+
+.reply-banner > svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.reply-banner button svg {
+  display: block;
+  width: 11px;
+  height: 11px;
+}
+
+.transfer-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.drag-handle svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.memory-card-pattern svg {
+  width: 34px;
+  height: 34px;
+  stroke-width: 1.3;
+}
+
+.menu-item > span:last-child svg,
+.menu-chevron svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  opacity: .72;
+}
+
+.call-control svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.call-text-form button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- 消息操作：默认收起，桌面端悬停浮现 ---------- */
+.msg {
+  position: relative;
+}
+
+.msg-actions {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .msg:hover .msg-actions,
+  .msg:focus-within .msg-actions {
+    position: absolute;
+    top: -6px;
+    right: 6px;
+    z-index: 4;
+    display: flex;
+    margin: 0;
+    padding: 3px 5px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel2) 97%, transparent);
+    box-shadow: 0 8px 22px -14px rgba(0, 0, 0, .55);
+  }
+}
+
+/* ---------- 群聊判定条：降噪，不与对话抢视觉焦点 ---------- */
+.group-check {
+  margin: 8px 12px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-left: 2px solid color-mix(in srgb, var(--acc) 40%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 62%, transparent);
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.group-check strong {
+  color: var(--dim);
+  font-weight: 600;
 }

@@ -22,7 +22,7 @@
     .initial-skeleton i:first-child{width:58%;height:28px}
     @keyframes sk{to{background-position:-200% 0}}
   </style>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body data-theme="strawberry">
   <div class="desktop-shell">
@@ -37,14 +37,14 @@
       <div class="rail-section">
         <div class="rail-title">
           <span>主题</span>
-          <button class="mini-btn" data-action="open-theme-manager" title="主题管理">⚙</button>
+          <button class="mini-btn" data-action="open-theme-manager" title="主题管理" data-icon="settings"></button>
         </div>
         <div id="themeRailList" class="theme-rail-list"></div>
       </div>
       <div class="rail-section rail-footer">
-        <button class="rail-action" data-action="open-settings"><span>⚙</span>设置</button>
-        <button class="rail-action" data-action="open-notifications"><span>◉</span>通知中心</button>
-        <button class="rail-action" data-action="lock-app"><span>⌑</span>锁定手机</button>
+        <button class="rail-action" data-action="open-settings"><span data-icon="settings"></span>设置</button>
+        <button class="rail-action" data-action="open-notifications"><span data-icon="notification"></span>通知中心</button>
+        <button class="rail-action" data-action="lock-app"><span data-icon="lock"></span>锁定手机</button>
       </div>
     </aside>
 
@@ -65,11 +65,11 @@
           <div id="callOverlay" class="call-overlay hidden" aria-live="polite"></div>
           <div id="sleepOverlay" class="sleep-overlay hidden" aria-live="polite"></div>
           <nav id="bottomNav" class="bottom-nav" aria-label="主导航">
-            <button data-route="messages"><span>◫<i id="navUnread" class="nav-dot hidden"></i></span>消息</button>
-            <button data-route="groups"><span>◎</span>群聊</button>
-            <button data-route="dates"><span>◇</span>约会</button>
-            <button data-route="health"><span>♡</span>体征</button>
-            <button data-route="profile"><span>⚙</span>设置</button>
+            <button data-route="messages"><span data-icon="messages"><i id="navUnread" class="nav-dot hidden"></i></span>消息</button>
+            <button data-route="groups"><span data-icon="groups"></span>群聊</button>
+            <button data-route="dates"><span data-icon="dates"></span>约会</button>
+            <button data-route="health"><span data-icon="health"></span>体征</button>
+            <button data-route="profile"><span data-icon="settings"></span>设置</button>
           </nav>
         </div>
         <div id="lockScreen" class="lock-screen hidden">
@@ -87,6 +87,6 @@
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true"></div>
   <div id="toasts" class="toasts"></div>
   <input id="globalFileInput" class="hidden" type="file">
-  <script src="app.js?v=8" defer></script>
+  <script src="app.js?v=10" defer></script>
 </body>
 </html>
